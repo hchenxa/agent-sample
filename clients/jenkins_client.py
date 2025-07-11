@@ -89,6 +89,23 @@ class JenkinsClient:
         except jenkins.JenkinsException as e:
             return f"Error fetching job count for view '{view_name}': {e}"
 
+    def get_build_parameters(self, job_name: str, build_number: int):
+        """
+        Retrieves parameters used for a specific build of a Jenkins job.
+        """
+        try:
+            build_info = self.server.get_build_info(job_name, build_number)
+            parameters = {}
+            for action in build_info.get('actions', []):
+                if '_class' in action and 'parameters' in action and "ParametersAction" in action['_class']:
+                    for param in action['parameters']:
+                        if 'name' in param and 'value' in param:
+                            parameters[param['name']] = param['value']
+                    break
+            return parameters
+        except jenkins.JenkinsException as e:
+            return f"Error fetching parameters for build {build_number} of job '{job_name}': {e}"
+
 if __name__ == '__main__':
     # Example Usage (replace with your Jenkins details)
     JENKINS_URL = 'http://localhost:8080'

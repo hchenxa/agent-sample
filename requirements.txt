@@ -3,3 +3,5 @@ python-dotenv
 truststore
 requests
 PyYAML
+ollama
+python-jenkins

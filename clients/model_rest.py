@@ -2,10 +2,11 @@ import requests
 
 
 class AssistantClient:
-    def __init__(self, api_key, base_url, model):
+    def __init__(self, api_key, base_url, model, verify_ssl: bool = True):
         self.api_key = api_key
         self.base_url = base_url
         self.model = model
+        self.verify_ssl = verify_ssl
 
     def chat(self, messages, **kwargs):
         headers = {
@@ -20,7 +21,7 @@ class AssistantClient:
         print("Debug - Request Payload:", payload)
 
         try:
-            response = requests.post(f"{self.base_url}/v1/chat/completions", headers=headers, json=payload)
+            response = requests.post(f"{self.base_url}/v1/chat/completions", headers=headers, json=payload, verify=self.verify_ssl)
             response.raise_for_status()
             data = response.json()
             message = data["choices"][0]["message"]["content"]

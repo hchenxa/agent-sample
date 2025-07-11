@@ -4,6 +4,7 @@ bin
 etc
 include
 lib
+lib64
 share
 venv
 pyvenv.cfg

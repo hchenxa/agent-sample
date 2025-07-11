@@ -177,13 +177,31 @@ if prompt := st.chat_input("What is up?"):
                         print("DEBUG: Matched check job command.")
                         job_name = check_job_match.group(2).strip()
                         info = jenkins_client.get_job_info(job_name)
+                        print("DEBUG: The jobs info is: ", info)
                         if isinstance(info, dict):
-                            resp = f"Info for job '{job_name}':\n"
-                            resp += f"  Last Build: {info.get('lastBuild', {}).get('number', 'N/A')} - {info.get('lastBuild', {}).get('url', 'N/A')}\n"
-                            resp += f"  Last Successful Build: {info.get('lastSuccessfulBuild', {}).get('number', 'N/A')}\n"
-                            resp += f"  Last Failed Build: {info.get('lastFailedBuild', {}).get('number', 'N/A')}\n"
-                            resp += f"  Buildable: {info.get('buildable', 'N/A')}\n"
-                            resp += f"  Color: {info.get('color', 'N/A')}"
+                            resp = f"### Details for Jenkins Job: {job_name}\n\n"
+                            resp += f"- **Description:** {info.get('description', 'N/A')}\n"
+                            resp += f"- **URL:** {info.get('url', 'N/A')}\n"
+                            resp += f"- **Buildable:** {info.get('buildable', 'N/A')}\n"
+                            resp += f"- **Last Build:** {info.get('lastBuild', {}).get('number', 'N/A')} (URL: {info.get('lastBuild', {}).get('url', 'N/A')})\n"
+                            resp += f"- **Last Successful Build:** {info.get('lastSuccessfulBuild', {}).get('number', 'N/A')}\n"
+                            resp += f"- **Last Failed Build:** {info.get('lastFailedBuild', {}).get('number', 'N/A')}\n"
+                            resp += f"- **Health Report:**\n"
+                            health_report = info.get('healthReport', [])
+                            if health_report:
+                                for report in health_report:
+                                    resp += f"  - {report.get('description', 'N/A')} (Score: {report.get('score', 'N/A')})\n"
+                            else:
+                                resp += "  N/A\n"
+                            resp += f"- **Color/Status:** {info.get('color', 'N/A').replace("_anime", " (building)")}\n"
+                            
+                            # Store info for later expander rendering
+                            st.session_state['jenkins_job_info_for_expander'] = {
+                                'job_name': job_name,
+                                'last_build_number': info.get('lastBuild', {}).get('number'),
+                                'jenkins_client': jenkins_client
+                            }
+
                         else:
                             resp = info  # Error message from client
                         jenkins_handled = True
@@ -223,6 +241,25 @@ if prompt := st.chat_input("What is up?"):
             if resp:
                 st.markdown(resp)
                 st.session_state.messages.append({"role": "assistant", "content": resp})
+
+                # Render Jenkins parameters expander if applicable
+                if jenkins_handled and 'jenkins_job_info_for_expander' in st.session_state and st.session_state['jenkins_job_info_for_expander']:
+                    job_info_for_expander = st.session_state.pop('jenkins_job_info_for_expander') # Pop to clear after use
+                    job_name_for_expander = job_info_for_expander['job_name']
+                    last_build_number_for_expander = job_info_for_expander['last_build_number']
+                    jenkins_client_for_expander = job_info_for_expander['jenkins_client']
+
+                    if last_build_number_for_expander:
+                        with st.expander(f"Parameters (Last Build #{last_build_number_for_expander})", expanded=False):
+                            build_params = jenkins_client_for_expander.get_build_parameters(job_name_for_expander, last_build_number_for_expander)
+                            if isinstance(build_params, dict) and build_params:
+                                for param_name, param_value in build_params.items():
+                                    st.markdown(f"- **{param_name}**: {param_value}")
+                            else:
+                                st.markdown(f"None found or error: {build_params}")
+                    else:
+                        st.markdown("- **Parameters (Last Build):** No last build found to retrieve parameters.")
+
             else:
                 st.error("No response generated.")
 

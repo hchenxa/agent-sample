@@ -237,7 +237,11 @@ if prompt := st.chat_input("What is up?"):
                     if rp_prompt.lower() == "list launches":
                         launches = rp_manager.get_launches()
                         if isinstance(launches, list) and launches:
-                            table_header = "| Launch Name | ID | URL |\n|---|---|---|"\n                            table_rows = []\n                            for launch in launches:\n                                table_rows.append(f"| {launch['name']} | {launch['id']} | [Link]({launch['url']}) |")\n                            resp = "### ReportPortal Launches:\n" + table_header + "\n".join(table_rows)
+                            table_header = "| Launch Name | ID | URL |\n|---|---|---|\n"
+                            table_rows = []
+                            for launch in launches:
+                                table_rows.append(f"| {launch['name']} | {launch['id']} | [Link]({launch['url']}) |")
+                            resp = "### ReportPortal Launches:\n" + table_header + "\n".join(table_rows)
                         elif isinstance(launches, list):
                             resp = "No launches found in ReportPortal."
                         else:

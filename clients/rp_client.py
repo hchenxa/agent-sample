@@ -26,7 +26,7 @@ class ReportPortalManager:
                 start_time=timestamp()
             )
 
-    def get_launches(self):
+    def get_launches(self, attribute_filter=None):
         import requests
         if self.endpoint and self.project and self.uuid:
             try:
@@ -38,7 +38,12 @@ class ReportPortalManager:
                 # Let's try a common one and adjust if necessary.
                 # A more robust solution would involve checking ReportPortal API documentation for the exact endpoint.
                 url = f"{self.endpoint}/api/v1/{self.project}/launch"
-                response = requests.get(url, headers=headers, verify=self.verify_ssl)
+                params = {}
+                if attribute_filter:
+                    for key, value in attribute_filter.items():
+                        params[f"filter.eq.{key}"] = value
+                
+                response = requests.get(url, headers=headers, verify=self.verify_ssl, params=params)
                 response.raise_for_status() # Raise an exception for HTTP errors
                 launches_data = response.json()
                 
@@ -52,10 +57,19 @@ class ReportPortalManager:
                         launch_id = launch.get('id')
                         launch_name = launch.get('name')
                         launch_url = f"{self.endpoint}/ui/#{self.project}/launches/all/{launch_id}" if launch_id else "N/A"
+                        
+                        pass_rate = "N/A"
+                        if 'statistics' in launch and 'executions' in launch['statistics']:
+                            executions = launch['statistics']['executions']
+                            total = executions.get('total', 0)
+                            passed = executions.get('passed', 0)
+                            if total > 0:
+                                pass_rate = f"{(passed / total * 100):.2f}%"
+
                         formatted_launches.append({
                             'name': launch_name,
-                            'id': launch_id,
-                            'url': launch_url
+                            'url': launch_url,
+                            'pass_rate': pass_rate
                         })
                     return formatted_launches
                 else:

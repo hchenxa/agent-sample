@@ -41,7 +41,7 @@ class ReportPortalManager:
                 params = {}
                 if attribute_filter:
                     for key, value in attribute_filter.items():
-                        params[f"filter.eq.{key}"] = value
+                        params[f"attribute.{key}"] = value
                 
                 print(f"DEBUG: ReportPortal API Request URL: {url}")
                 print(f"DEBUG: ReportPortal API Request Params: {params}")

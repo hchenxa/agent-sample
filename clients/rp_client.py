@@ -3,10 +3,11 @@ from reportportal_client import RPClient
 from reportportal_client.helpers import timestamp
 
 class ReportPortalManager:
-    def __init__(self, endpoint, uuid, project):
+    def __init__(self, endpoint, uuid, project, verify_ssl=True):
         self.endpoint = endpoint
         self.uuid = uuid
         self.project = project
+        self.verify_ssl = verify_ssl
         self.client = None
 
     def start_service(self):
@@ -37,7 +38,7 @@ class ReportPortalManager:
                 # Let's try a common one and adjust if necessary.
                 # A more robust solution would involve checking ReportPortal API documentation for the exact endpoint.
                 url = f"{self.endpoint}/api/v1/{self.project}/launch"
-                response = requests.get(url, headers=headers)
+                response = requests.get(url, headers=headers, verify=self.verify_ssl)
                 response.raise_for_status() # Raise an exception for HTTP errors
                 launches_data = response.json()
                 

@@ -82,9 +82,10 @@ with st.sidebar.expander("ReportPortal Configuration"):
     rp_endpoint = st.text_input("ReportPortal Endpoint", value=os.environ.get("RP_ENDPOINT", ""))
     rp_uuid = st.text_input("ReportPortal UUID", value=os.environ.get("RP_UUID", ""), type="password")
     rp_project = st.text_input("ReportPortal Project", value=os.environ.get("RP_PROJECT", ""))
+    disable_ssl_verification_rp = st.checkbox("Disable SSL Verification for ReportPortal (Insecure)", value=True, help="Check this only if you are experiencing SSL certificate errors with ReportPortal and understand the security implications.")
     
     if rp_endpoint and rp_uuid and rp_project:
-        rp_manager = ReportPortalManager(endpoint=rp_endpoint, uuid=rp_uuid, project=rp_project)
+        rp_manager = ReportPortalManager(endpoint=rp_endpoint, uuid=rp_uuid, project=rp_project, verify_ssl=not disable_ssl_verification_rp)
         rp_manager.start_service()
         rp_manager.start_launch("AI-Copilot Chat")
         st.success("ReportPortal integration enabled.")

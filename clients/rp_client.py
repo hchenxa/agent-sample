@@ -26,13 +26,44 @@ class ReportPortalManager:
             )
 
     def get_launches(self):
-        if self.client:
+        import requests
+        if self.endpoint and self.project and self.uuid:
             try:
-                launches = self.client.get_launch_ui_urls()
-                return launches
+                headers = {
+                    "Authorization": f"Bearer {self.uuid}"
+                }
+                # Assuming the API endpoint for launches is /api/v1/{projectName}/launch
+                # The documentation mentioned /api/v1/:projectName/launch/names, but a more general launch endpoint might be needed
+                # Let's try a common one and adjust if necessary.
+                # A more robust solution would involve checking ReportPortal API documentation for the exact endpoint.
+                url = f"{self.endpoint}/api/v1/{self.project}/launch"
+                response = requests.get(url, headers=headers)
+                response.raise_for_status() # Raise an exception for HTTP errors
+                launches_data = response.json()
+                
+                # ReportPortal API for launches usually returns a 'content' field with a list of launches
+                if 'content' in launches_data and isinstance(launches_data['content'], list):
+                    # Extract relevant information: name, id, and construct a UI URL
+                    # The UI URL construction might vary based on ReportPortal setup.
+                    # A common pattern is {endpoint}/ui/#{projectName}/launches/all/{launchId}
+                    formatted_launches = []
+                    for launch in launches_data['content']:
+                        launch_id = launch.get('id')
+                        launch_name = launch.get('name')
+                        launch_url = f"{self.endpoint}/ui/#{self.project}/launches/all/{launch_id}" if launch_id else "N/A"
+                        formatted_launches.append({
+                            'name': launch_name,
+                            'id': launch_id,
+                            'url': launch_url
+                        })
+                    return formatted_launches
+                else:
+                    return "Unexpected response format from ReportPortal API."
+            except requests.exceptions.RequestException as e:
+                return f"Error connecting to ReportPortal API: {e}"
             except Exception as e:
-                return f"Error getting launches: {e}"
-        return "ReportPortal client not initialized."
+                return f"Error processing ReportPortal launches: {e}"
+        return "ReportPortal configuration incomplete (endpoint, UUID, or project missing)."
 
     def finish_launch(self):
         if self.client:

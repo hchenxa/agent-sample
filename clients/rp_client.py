@@ -43,6 +43,8 @@ class ReportPortalManager:
                     for key, value in attribute_filter.items():
                         params[f"filter.eq.{key}"] = value
                 
+                print(f"DEBUG: ReportPortal API Request URL: {url}")
+                print(f"DEBUG: ReportPortal API Request Params: {params}")
                 response = requests.get(url, headers=headers, verify=self.verify_ssl, params=params)
                 response.raise_for_status() # Raise an exception for HTTP errors
                 launches_data = response.json()

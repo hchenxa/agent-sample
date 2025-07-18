@@ -82,11 +82,10 @@ with st.sidebar.expander("ReportPortal Configuration"):
     rp_endpoint = st.text_input("ReportPortal Endpoint", value=os.environ.get("RP_ENDPOINT", ""))
     rp_uuid = st.text_input("ReportPortal UUID", value=os.environ.get("RP_UUID", ""), type="password")
     rp_project = st.text_input("ReportPortal Project", value=os.environ.get("RP_PROJECT", ""))
+    disable_ssl_verification_rp = st.checkbox("Disable SSL Verification for ReportPortal (Insecure)", value=True, help="Check this only if you are experiencing SSL certificate errors with ReportPortal and understand the security implications.")
     
     if rp_endpoint and rp_uuid and rp_project:
-        rp_manager = ReportPortalManager(endpoint=rp_endpoint, uuid=rp_uuid, project=rp_project)
-        rp_manager.start_service()
-        rp_manager.start_launch("AI-Copilot Chat")
+        rp_manager = ReportPortalManager(endpoint=rp_endpoint, uuid=rp_uuid, project=rp_project, verify_ssl=not disable_ssl_verification_rp)
         st.success("ReportPortal integration enabled.")
 
 # --- Chat History Management ---
@@ -227,25 +226,36 @@ if prompt := st.chat_input("What is up?"):
   - `/jenkins check job <job_name>` or `check jenkins job <job_name>`
   - `/jenkins trigger job <job_name> [with params param1=value1,param2=value2]` or `trigger jenkins job <job_name> [with params param1=value1,param2=value2]`
 - ReportPortal Commands (if configured):
-    - `/rp list launches`
+    - `/rp list launches [attribute_key=attribute_value]`
 - General Chat: Any other query will be handled by the selected LLM (Models.corp or Ollama)."""
                     jenkins_handled = True # Mark as handled to skip LLM
                     print(f"DEBUG: Help command handled. jenkins_handled: {jenkins_handled}")
 
                 if not jenkins_handled and rp_manager and prompt.lower().startswith("/rp"):
                     rp_prompt = prompt[len("/rp"):].strip()
-                    if rp_prompt.lower() == "list launches":
-                        launches = rp_manager.get_launches()
-                        if isinstance(launches, list) and launches:
-                            table_header = "| Launch Name | ID | URL |\n|---|---|---|\n"
-                            table_rows = []
-                            for launch in launches:
-                                table_rows.append(f"| {launch['name']} | {launch['id']} | [Link]({launch['url']}) |")
-                            resp = "### ReportPortal Launches:\n" + table_header + "\n".join(table_rows)
-                        elif isinstance(launches, list):
-                            resp = "No launches found in ReportPortal."
-                        else:
-                            resp = launches # Error message
+                    if rp_prompt.lower().startswith("list launches"):
+                        attribute_filter = None
+                        filter_part = rp_prompt[len("list launches"):].strip()
+                        if filter_part:
+                            try:
+                                key, value = filter_part.split("=", 1)
+                                attribute_filter = {key.strip(): value.strip()}
+                            except ValueError:
+                                resp = "Invalid attribute filter format. Please use 'key=value'."
+                                rp_handled = True
+                        
+                        if not rp_handled:
+                            launches = rp_manager.get_launches(attribute_filter=attribute_filter)
+                            if isinstance(launches, list) and launches:
+                                table_header = "| Launch Name | Pass Rate | URL |\n|---|---|---|\n"
+                                table_rows = []
+                                for launch in launches:
+                                    table_rows.append(f"| {launch['name']} | {launch['pass_rate']} | [Link]({launch['url']}) |")
+                                resp = "### ReportPortal Launches:\n" + table_header + "\n".join(table_rows)
+                            elif isinstance(launches, list):
+                                resp = "No launches found in ReportPortal with the given filter."
+                            else:
+                                resp = launches # Error message
                         rp_handled = True
 
 
@@ -404,6 +414,3 @@ if prompt := st.chat_input("What is up?"):
 if not st.session_state.chat_sessions:
     new_chat()
 
-if rp_manager:
-    import atexit
-    atexit.register(rp_manager.finish_launch)

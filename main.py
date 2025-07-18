@@ -86,8 +86,6 @@ with st.sidebar.expander("ReportPortal Configuration"):
     
     if rp_endpoint and rp_uuid and rp_project:
         rp_manager = ReportPortalManager(endpoint=rp_endpoint, uuid=rp_uuid, project=rp_project, verify_ssl=not disable_ssl_verification_rp)
-        rp_manager.start_service()
-        rp_manager.start_launch("AI-Copilot Chat")
         st.success("ReportPortal integration enabled.")
 
 # --- Chat History Management ---
@@ -416,6 +414,3 @@ if prompt := st.chat_input("What is up?"):
 if not st.session_state.chat_sessions:
     new_chat()
 
-if rp_manager:
-    import atexit
-    atexit.register(rp_manager.finish_launch)

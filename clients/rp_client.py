@@ -1,6 +1,7 @@
 import os
-from reportportal_client import RPClient
-from reportportal_client.helpers import timestamp
+import requests
+from requests import Request, Session
+import urllib.parse
 
 class ReportPortalManager:
     def __init__(self, endpoint, uuid, project, verify_ssl=True):
@@ -8,44 +9,22 @@ class ReportPortalManager:
         self.uuid = uuid
         self.project = project
         self.verify_ssl = verify_ssl
-        self.client = None
-
-    def start_service(self):
-        if not self.client:
-            self.client = RPClient(
-                endpoint=self.endpoint,
-                project=self.project,
-                api_key=self.uuid
-            )
-            self.client.start()
-
-    def start_launch(self, launch_name):
-        if self.client:
-            self.client.start_launch(
-                name=launch_name,
-                start_time=timestamp()
-            )
+        self.session = Session()
 
     def get_launches(self, attribute_filter=None):
-        import requests
         if self.endpoint and self.project and self.uuid:
             try:
                 headers = {
                     "Authorization": f"Bearer {self.uuid}"
                 }
-                # Assuming the API endpoint for launches is /api/v1/{projectName}/launch
-                # The documentation mentioned /api/v1/:projectName/launch/names, but a more general launch endpoint might be needed
-                # Let's try a common one and adjust if necessary.
-                # A more robust solution would involve checking ReportPortal API documentation for the exact endpoint.
-                url = f"{self.endpoint}/api/v1/{self.project}/launch"
-                params = {}
+                url = f"{self.endpoint}/api/v1/{self.project}/launch?page.sort=startTime%2Cdesc"
+                print(f"DEBUG: attribute is : {attribute_filter}")
                 if attribute_filter:
-                    for key, value in attribute_filter.items():
-                        params[f"attribute.{key}"] = value
-                
-                print(f"DEBUG: ReportPortal API Request URL: {url}")
-                print(f"DEBUG: ReportPortal API Request Params: {params}")
-                response = requests.get(url, headers=headers, verify=self.verify_ssl, params=params)
+                    url += f"&filter.has.compositeAttribute={attribute_filter}"
+                print(f"DEBUG: url is: {url}")
+                req = Request('GET', url, headers=headers)
+                prepped = self.session.prepare_request(req)
+                response = self.session.send(prepped, verify=self.verify_ssl)
                 response.raise_for_status() # Raise an exception for HTTP errors
                 launches_data = response.json()
                 
@@ -81,14 +60,3 @@ class ReportPortalManager:
             except Exception as e:
                 return f"Error processing ReportPortal launches: {e}"
         return "ReportPortal configuration incomplete (endpoint, UUID, or project missing)."
-
-    def finish_launch(self):
-        if self.client:
-            self.client.finish_launch(
-                end_time=timestamp()
-            )
-            self.client.terminate()
-
-    def terminate_service(self):
-        if self.client:
-            self.client.terminate()

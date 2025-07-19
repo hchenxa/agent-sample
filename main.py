@@ -238,10 +238,18 @@ if prompt := st.chat_input("What is up?"):
                         filter_part = rp_prompt[len("list launches"):].strip()
                         if filter_part:
                             try:
-                                key, value = filter_part.split("=", 1)
-                                attribute_filter = {key.strip(): value.strip()}
+                                attribute_filters = []
+                                for part in filter_part.split(","):
+                                    if ":" in part:
+                                        key, value = part.split(":", 1)
+                                    elif "=" in part:
+                                        key, value = part.split("=", 1)
+                                    else:
+                                        raise ValueError("Invalid format")
+                                    attribute_filters.append(f"{key.strip()}:{value.strip()}")
+                                attribute_filter = ",".join(attribute_filters)
                             except ValueError:
-                                resp = "Invalid attribute filter format. Please use 'key=value'."
+                                resp = "Invalid attribute filter format. Please use 'key:value' or 'key=value'."
                                 rp_handled = True
                         
                         if not rp_handled:

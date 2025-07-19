@@ -2,6 +2,7 @@ import os
 import requests
 from requests import Request, Session
 import urllib.parse
+import logging
 
 class ReportPortalManager:
     def __init__(self, endpoint, uuid, project, verify_ssl=True):
@@ -20,6 +21,7 @@ class ReportPortalManager:
                 url = f"{self.endpoint}/api/v1/{self.project}/launch?page.sort=startTime%2Cdesc"
                 print(f"DEBUG: attribute is : {attribute_filter}")
                 if attribute_filter:
+                    logging.debug(f"attribute is : {attribute_filter}")
                     url += f"&filter.has.compositeAttribute={attribute_filter}"
                 print(f"DEBUG: url is: {url}")
                 req = Request('GET', url, headers=headers)

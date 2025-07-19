@@ -9,8 +9,18 @@ import dotenv
 import requests
 import yaml
 import uuid
+import re
+import pandas as pd
+from collections import Counter
+import matplotlib.pyplot as plt
 
 dotenv.load_dotenv()
+
+# Initialize flags at a higher scope to ensure they are always defined
+jenkins_handled = False
+rp_handled = False
+skip_llm_analysis = False
+charts_and_analysis_rendered = False
 
 # --- Helper Functions ---
 @st.cache_data(ttl=60)
@@ -201,6 +211,11 @@ if active_chat:
 
 # Chat input
 if prompt := st.chat_input("What is up?"):
+    # Initialize flags at a higher scope
+    jenkins_handled = False
+    rp_handled = False
+    skip_llm_analysis = False
+
     if prompt.strip().lower() == "/new-chat":
         new_chat()
     elif active_chat:
@@ -217,6 +232,43 @@ if prompt := st.chat_input("What is up?"):
 
                 print(f"DEBUG: Prompt received: {prompt}")
 
+                # New logic to parse general prompts for ReportPortal filters
+                if rp_manager and not jenkins_handled:
+                    print(f"DEBUG: Attempting general RP prompt parsing for: {prompt}")
+                    rp_general_match = re.search(r"(?:test report for|test report of|analysis for|data for)\s+(?:component\s*=\s*|component\s*:\s*)?([a-zA-Z0-9_.-]+)(?:\s+in\s+release\s*=\s*|\s+in\s+release\s*:\s*)?([a-zA-Z0-9_.-]+)?", prompt.lower())
+                    
+                    extracted_filters = []
+                    if rp_general_match:
+                        component = rp_general_match.group(1)
+                        release = rp_general_match.group(2)
+                        print(f"DEBUG: rp_general_match found. Component: {component}, Release: {release}")
+                        if component:
+                            extracted_filters.append(f"component:{component}")
+                        if release:
+                            extracted_filters.append(f"release:{release}")
+                        
+                        if extracted_filters:
+                            attribute_filter = ",".join(extracted_filters)
+                            print(f"DEBUG: Extracted RP filters: {attribute_filter}")
+                            
+                            launches = rp_manager.get_launches(attribute_filter=attribute_filter)
+                            print(f"DEBUG: get_launches called. Result type: {type(launches)}")
+                            if isinstance(launches, list):
+                                st.session_state['rp_launches_data'] = launches # Store for charting
+                                print(f"DEBUG: st.session_state['rp_launches_data'] set to: {st.session_state['rp_launches_data']}")
+                                if launches:
+                                    table_header = "| Launch Name | Pass Rate | URL |\n|---|---|---|\n"
+                                    table_rows = []
+                                    for launch in launches:
+                                        table_rows.append(f"| {launch['name']} | {launch['pass_rate']} | [Link]({launch['url']}) |")
+                                    resp = "### ReportPortal Launches:\n" + table_header + "\n".join(table_rows)
+                                else:
+                                    resp = "No launches found in ReportPortal with the given filter."
+                            else:
+                                resp = launches # Error message from RP client
+                            rp_handled = True # Mark as handled if RP logic was engaged
+                            print(f"DEBUG: rp_handled set to {rp_handled}")
+
                 if prompt.strip() == "/" or prompt.strip().lower() == "/help":
                     resp = """Available Commands:
 - `/new-chat`: Start a new chat session.
@@ -229,32 +281,37 @@ if prompt := st.chat_input("What is up?"):
     - `/rp list launches [attribute_key=attribute_value]`
 - General Chat: Any other query will be handled by the selected LLM (Models.corp or Ollama)."""
                     jenkins_handled = True # Mark as handled to skip LLM
-                    print(f"DEBUG: Help command handled. jenkins_handled: {jenkins_handled}")
+                    print(f"DEBUG: Help command handled. {jenkins_handled=}")
 
-                if not jenkins_handled and rp_manager and prompt.lower().startswith("/rp"):
+                skip_llm_analysis = False # Initialize flag
+
+                # Explicit /rp commands (only if not already handled by general RP parsing)
+                if not jenkins_handled and rp_manager and prompt.lower().startswith("/rp") and not rp_handled:
                     rp_prompt = prompt[len("/rp"):].strip()
                     if rp_prompt.lower().startswith("list launches"):
                         attribute_filter = None
                         filter_part = rp_prompt[len("list launches"):].strip()
                         if filter_part:
                             try:
-                                attribute_filters = []
-                                for part in filter_part.split(","):
-                                    if ":" in part:
-                                        key, value = part.split(":", 1)
-                                    elif "=" in part:
-                                        key, value = part.split("=", 1)
+                                # Support multiple attributes separated by commas, and key=value or key:value
+                                attributes = []
+                                for attr_pair_str in filter_part.split(","):
+                                    if "=" in attr_pair_str:
+                                        key, value = attr_pair_str.split("=", 1)
+                                    elif ":" in attr_pair_str:
+                                        key, value = attr_pair_str.split(":", 1)
                                     else:
-                                        raise ValueError("Invalid format")
-                                    attribute_filters.append(f"{key.strip()}:{value.strip()}")
-                                attribute_filter = ",".join(attribute_filters)
-                            except ValueError:
-                                resp = "Invalid attribute filter format. Please use 'key:value' or 'key=value'."
+                                        raise ValueError("Invalid attribute filter format. Use 'key=value' or 'key:value'.")
+                                    attributes.append(f"{key.strip()}:{value.strip()}")
+                                attribute_filter = ",".join(attributes)
+                            except ValueError as e:
+                                resp = f"Invalid attribute filter format: {e}. Please use 'key=value,key1=value1' or 'key:value,key1:value1'."
                                 rp_handled = True
                         
                         if not rp_handled:
                             launches = rp_manager.get_launches(attribute_filter=attribute_filter)
                             if isinstance(launches, list) and launches:
+                                st.session_state['rp_launches_data'] = launches # Store for charting
                                 table_header = "| Launch Name | Pass Rate | URL |\n|---|---|---|\n"
                                 table_rows = []
                                 for launch in launches:
@@ -265,6 +322,103 @@ if prompt := st.chat_input("What is up?"):
                             else:
                                 resp = launches # Error message
                         rp_handled = True
+                        skip_llm_analysis = True # Set flag to skip LLM analysis for explicit /rp commands
+                    else:
+                        resp = "I didn't understand your ReportPortal command. Try 'list launches [attribute_key=attribute_value]'."
+                        rp_handled = True
+
+                # Common charting and LLM analysis for ReportPortal data
+                if rp_handled and 'rp_launches_data' in st.session_state and st.session_state['rp_launches_data'] and not charts_and_analysis_rendered:
+                    launches_for_charting_and_analysis = st.session_state['rp_launches_data']
+                    df = pd.DataFrame(launches_for_charting_and_analysis)
+
+                    # Pass Rate Trend Chart
+                    st.subheader("Pass Rate Trend")
+                    df['pass_rate_numeric'] = df['pass_rate'].str.replace('%', '').astype(float)
+                    # Ensure 'startTime' is converted to datetime for proper sorting and plotting
+                    df['start_time'] = pd.to_datetime(df['startTime'], unit='ms')
+                    df = df.sort_values(by='start_time')
+                    st.line_chart(df, x='start_time', y='pass_rate_numeric')
+
+                    # OCP Platform Test Coverage Chart
+                    st.subheader("OCP Platform Test Coverage")
+                    
+                    def get_ocp_version_from_attributes(attributes):
+                        for attr in attributes:
+                            if attr.get('key') == 'ocpImage':
+                                return attr.get('value', 'OCP_Unknown')
+                        return 'OCP_Unknown'
+
+                    df['ocp_version'] = df['attributes'].apply(get_ocp_version_from_attributes)
+                    
+                    # Calculate total tests per OCP version
+                    ocp_coverage = df.groupby('ocp_version').agg(total_tests=('total', 'sum')).reset_index()
+
+                    # Create a pie chart using matplotlib
+                    fig, ax = plt.subplots()
+                    ax.pie(ocp_coverage['total_tests'], labels=ocp_coverage['ocp_version'], autopct='%1.1f%%', startangle=90)
+                    ax.axis('equal')  # Equal aspect ratio ensures that pie is drawn as a circle.
+                    st.pyplot(fig)
+
+                    # Analyze and display most frequent failure cases
+                    st.subheader("Most Frequent Failure Cases")
+                    all_failed_test_names = []
+                    all_failed_issue_types = []
+
+                    # Define the filter for failed/interrupted test items
+                    failed_item_filter = "filter.eq.hasStats=true&filter.eq.hasChildren=false&filter.in.type=STEP&filter.in.status=FAILED%2CSKIPPED%2CINTERRUPTED%2CSTOPPED"
+
+                    for launch in launches_for_charting_and_analysis:
+                        
+                        launch_id = launch.get('id')
+                        failed_count = launch.get('failed', 0)
+                        skipped_count = launch.get('skipped', 0)
+                        
+                        # Only query for test items if there are reported failures/skipped/interrupted tests
+                        if launch_id and (failed_count > 0 or skipped_count > 0):
+                            # Pass the filter to get_test_items_for_launch
+                            test_items = rp_manager.get_test_items_for_launch(launch_id, item_filter=failed_item_filter)
+                            if isinstance(test_items, list):
+                                for item in test_items:
+                                    # The items are already filtered by the API, so just append
+                                    all_failed_test_names.append(item.get('name', 'Unknown Test'))
+                                    all_failed_issue_types.append(item.get('issue_type', 'Unknown Issue Type'))
+                            else:
+                                st.warning(f"Could not retrieve test items for launch {launch_id}: {test_items}")
+                    
+                    
+                    
+
+                    if all_failed_test_names:
+                        top_failed_tests = Counter(all_failed_test_names).most_common(5) # Top 5 failing tests
+                        st.markdown("**Top 5 Failing Tests:**")
+                        for test_name, count in top_failed_tests:
+                            st.markdown(f"- {test_name} (Failed {count} times)")
+                    else:
+                        st.markdown("No failed tests found in the selected launches.")
+
+                    
+
+                    # LLM Analysis
+                    if provider == "Models.corp" and client and not skip_llm_analysis:
+                        analysis_prompt = f"The user asked: '{prompt}'. Here is a list of ReportPortal launches:\n\n"
+                        for launch in launches_for_charting_and_analysis:
+                            analysis_prompt += f"- Name: {launch['name']}, Pass Rate: {launch['passed']}/{launch['total']} ({launch['pass_rate']}), URL: {launch['url']}\n"
+                        
+                        if all_failed_test_names:
+                            analysis_prompt += "\nMost Frequent Failing Tests:\n"
+                            for test_name, count in Counter(all_failed_test_names).most_common(5):
+                                analysis_prompt += f"- {test_name} (Failed {count} times)\n"
+
+                        analysis_prompt += "\nBased on this data and the user's original request, please provide a comprehensive analysis. Focus on aspects like pass rates, test coverage across platforms, and identifying unstable tests."
+                        
+                        try:
+                            llm_analysis_resp = client.chat(messages=[{"role": "user", "content": analysis_prompt}])
+                            st.markdown("\n\n### LLM Analysis:\n" + llm_analysis_resp)
+                            active_chat["messages"].append({"role": "assistant", "content": "\n\n### LLM Analysis:\n" + llm_analysis_resp}) # Add to chat history
+                        except Exception as e:
+                            st.markdown(f"\n\nError during LLM analysis: {e}")
+                            active_chat["messages"].append({"role": "assistant", "content": f"\n\nError during LLM analysis: {e}"}) # Add error to chat history
 
 
                 if not jenkins_handled and not rp_handled and jenkins_client:
@@ -376,7 +530,6 @@ if prompt := st.chat_input("What is up?"):
                         jenkins_handled = True # Ensure it's handled by Jenkins logic, even if unrecognized
                         print(f"DEBUG: Jenkins explicit command not understood. resp: {resp}")
 
-                print(f"DEBUG: jenkins_handled before LLM check: {jenkins_handled}")
                 if not jenkins_handled and not rp_handled:
                     try:
                         if client:
@@ -394,7 +547,6 @@ if prompt := st.chat_input("What is up?"):
                     st.markdown(resp)
                     active_chat["messages"].append({"role": "assistant", "content": resp})
                     save_chat_session()
-                    st.rerun()
 
                     # Render Jenkins parameters expander if applicable
                     if jenkins_handled and 'jenkins_job_info_for_expander' in st.session_state and st.session_state['jenkins_job_info_for_expander']:
@@ -422,3 +574,66 @@ if prompt := st.chat_input("What is up?"):
 if not st.session_state.chat_sessions:
     new_chat()
 
+# Moved ReportPortal charting and analysis outside the spinner
+#if rp_handled and 'rp_launches_data' in st.session_state and st.session_state['rp_launches_data'] and not charts_and_analysis_rendered:
+#    launches_for_charting_and_analysis = st.session_state['rp_launches_data']
+#    df = pd.DataFrame(launches_for_charting_and_analysis)
+#
+#    # OCP Platform Test Coverage Chart
+#    st.subheader("OCP Platform Test Coverage")
+#    
+#    def get_ocp_version_from_attributes(attributes):
+#        for attr in attributes:
+#            if attr.get('key') == 'ocpImage':
+#                return attr.get('value', 'OCP_Unknown')
+#        return 'OCP_Unknown'
+#
+#    df['ocp_version'] = df['attributes'].apply(get_ocp_version_from_attributes)
+#    
+#
+#    # Analyze and display most frequent failure cases
+#    st.subheader("Most Frequent Failure Cases")
+#    all_failed_test_names = []
+#    all_failed_issue_types = []
+#
+#    for launch in launches_for_charting_and_analysis:
+#        launch_id = launch.get('id')
+#        if launch_id:
+#            test_items = rp_manager.get_test_items_for_launch(launch_id)
+#            if isinstance(test_items, list):
+#                for item in test_items:
+#                    if item.get('status') == 'FAILED':
+#                        all_failed_test_names.append(item.get('name', 'Unknown Test'))
+#                        all_failed_issue_types.append(item.get('issue_type', 'Unknown Issue Type'))
+#            else:
+#                st.warning(f"Could not retrieve test items for launch {launch_id}: {test_items}")
+#    
+#    if all_failed_test_names:
+#        top_failed_tests = Counter(all_failed_test_names).most_common(5) # Top 5 failing tests
+#        st.markdown("**Top 5 Failing Tests:**")
+#        for test_name, count in top_failed_tests:
+#            st.markdown(f"- {test_name} (Failed {count} times)")
+#    else:
+#        st.markdown("No failed tests found in the selected launches.")
+#
+#
+#    # LLM Analysis
+#    if provider == "Models.corp" and client and not skip_llm_analysis:
+#        analysis_prompt = f"The user asked: '{prompt}'. Here is a list of ReportPortal launches:\n\n"
+#        for launch in launches_for_charting_and_analysis:
+#            analysis_prompt += f"- Name: {launch['name']}, Pass Rate: {launch['passed']}/{launch['total']} ({launch['pass_rate']}), URL: {launch['url']}\n"
+#        
+#        if all_failed_test_names:
+#            analysis_prompt += "\nMost Frequent Failing Tests:\n"
+#            for test_name, count in Counter(all_failed_test_names).most_common(5):
+#                analysis_prompt += f"- {test_name} (Failed {count} times)\n"
+#        
+#        analysis_prompt += "\nBased on this data, including the Pass Rate Trend Chart and OCP Platform Test Coverage Chart, and the user's original request, please provide a comprehensive analysis. Focus on aspects like pass rates, test coverage across platforms, and identifying unstable tests. Describe the trends and insights observed in the charts."
+#        
+#        try:
+#            llm_analysis_resp = client.chat(messages=[{"role": "user", "content": analysis_prompt}])
+#            st.markdown("\n\n### LLM Analysis:\n" + llm_analysis_resp)
+#        except Exception as e:
+#            st.markdown(f"\n\nError during LLM analysis: {e}")
+#    charts_and_analysis_rendered = True # Set flag to True after rendering
+#

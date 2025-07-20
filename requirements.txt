@@ -6,3 +6,4 @@ PyYAML
 ollama
 python-jenkins
 reportportal-client
+matplotlib

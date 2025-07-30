@@ -1,4 +1,6 @@
 import os
+import argparse
+import sys
 import streamlit as st
 from clients.model_rest import AssistantClient
 from clients.ollama_client import OllamaClient
@@ -13,8 +15,21 @@ import re
 import pandas as pd
 from collections import Counter
 import matplotlib.pyplot as plt
+import subprocess
+import select
+import socket
+import io
+import base64
 
 dotenv.load_dotenv()
+
+# --- Argument Parsing ---
+parser = argparse.ArgumentParser(description="Run Echo Chatbot with optional features.")
+parser.add_argument('--enable-slidev', action='store_true', help='Enable Slidev presentation generation for ReportPortal reports.')
+args, unknown = parser.parse_known_args()
+
+if 'enable_slidev' not in st.session_state:
+    st.session_state.enable_slidev = args.enable_slidev
 
 # Initialize flags at a higher scope to ensure they are always defined
 jenkins_handled = False
@@ -329,16 +344,30 @@ if prompt := st.chat_input("What is up?"):
 
                 # Common charting and LLM analysis for ReportPortal data
                 if rp_handled and 'rp_launches_data' in st.session_state and st.session_state['rp_launches_data'] and not charts_and_analysis_rendered:
+                    slidev_output_dir = os.path.join(os.getcwd(), "slidev_presentations")
+                    os.makedirs(slidev_output_dir, exist_ok=True)
                     launches_for_charting_and_analysis = st.session_state['rp_launches_data']
                     df = pd.DataFrame(launches_for_charting_and_analysis)
 
                     # Pass Rate Trend Chart
+                    pass_rate_chart_path = os.path.join(slidev_output_dir, "pass_rate_trend.png")
                     st.subheader("Pass Rate Trend")
                     df['pass_rate_numeric'] = df['pass_rate'].str.replace('%', '').astype(float)
                     # Ensure 'startTime' is converted to datetime for proper sorting and plotting
                     df['start_time'] = pd.to_datetime(df['startTime'], unit='ms')
                     df = df.sort_values(by='start_time')
-                    st.line_chart(df, x='start_time', y='pass_rate_numeric')
+                    
+                    fig_pass_rate, ax_pass_rate = plt.subplots(figsize=(10, 6))
+                    ax_pass_rate.plot(df['start_time'], df['pass_rate_numeric'], marker='o')
+                    ax_pass_rate.set_title('Pass Rate Trend')
+                    ax_pass_rate.set_xlabel('Date')
+                    ax_pass_rate.set_ylabel('Pass Rate (%)')
+                    ax_pass_rate.grid(True)
+                    plt.xticks(rotation=45)
+                    plt.tight_layout()
+                    fig_pass_rate.savefig(pass_rate_chart_path)
+                    plt.close(fig_pass_rate) # Close the figure to free memory
+                    st.image(pass_rate_chart_path)
 
                     # OCP Platform Test Coverage Chart
                     st.subheader("OCP Platform Test Coverage")
@@ -355,36 +384,51 @@ if prompt := st.chat_input("What is up?"):
                     ocp_coverage = df.groupby('ocp_version').agg(total_tests=('total', 'sum')).reset_index()
 
                     # Create a pie chart using matplotlib
-                    fig, ax = plt.subplots()
-                    ax.pie(ocp_coverage['total_tests'], labels=ocp_coverage['ocp_version'], autopct='%1.1f%%', startangle=90)
-                    ax.axis('equal')  # Equal aspect ratio ensures that pie is drawn as a circle.
-                    st.pyplot(fig)
+                    ocp_coverage_chart_path = os.path.join(slidev_output_dir, "ocp_coverage.png")
+                    print(f"DEBUG: OCP Coverage Chart Path: {ocp_coverage_chart_path}")
+                    print(f"DEBUG: OCP Coverage DataFrame:\n{ocp_coverage}")
+                    fig_ocp_coverage, ax_ocp_coverage = plt.subplots()
+                    ax_ocp_coverage.pie(ocp_coverage['total_tests'], labels=ocp_coverage['ocp_version'], autopct='%1.1f%%', startangle=90)
+                    ax_ocp_coverage.axis('equal')  # Equal aspect ratio ensures that pie is drawn as a circle.
+                    fig_ocp_coverage.savefig(ocp_coverage_chart_path)
+                    plt.close(fig_ocp_coverage) # Close the figure to free memory
+                    st.image(ocp_coverage_chart_path)
+                    if os.path.exists(ocp_coverage_chart_path):
+                        print(f"DEBUG: OCP Coverage Chart file exists at {ocp_coverage_chart_path}")
+                    else:
+                        print(f"DEBUG: OCP Coverage Chart file DOES NOT exist at {ocp_coverage_chart_path}")
 
                     # Analyze and display most frequent failure cases
                     st.subheader("Most Frequent Failure Cases")
                     all_failed_test_names = []
-                    all_failed_issue_types = []
+                    all_skipped_test_names = [] # New list for skipped tests
+                    all_failed_issue_types = [] # Keep for potential future use or existing LLM analysis
 
-                    # Define the filter for failed/interrupted test items
-                    failed_item_filter = "filter.eq.hasStats=true&filter.eq.hasChildren=false&filter.in.type=STEP&filter.in.status=FAILED%2CSKIPPED%2CINTERRUPTED%2CSTOPPED"
+                    # Define filters for failed and skipped test items separately
+                    failed_item_filter = "filter.eq.hasStats=true&filter.eq.hasChildren=false&filter.in.type=STEP&filter.in.status=FAILED"
+                    skipped_item_filter = "filter.eq.hasStats=true&filter.eq.hasChildren=false&filter.in.type=STEP&filter.in.status=SKIPPED"
 
                     for launch in launches_for_charting_and_analysis:
-                        
                         launch_id = launch.get('id')
                         failed_count = launch.get('failed', 0)
                         skipped_count = launch.get('skipped', 0)
                         
-                        # Only query for test items if there are reported failures/skipped/interrupted tests
-                        if launch_id and (failed_count > 0 or skipped_count > 0):
-                            # Pass the filter to get_test_items_for_launch
+                        if launch_id and failed_count > 0:
                             test_items = rp_manager.get_test_items_for_launch(launch_id, item_filter=failed_item_filter)
                             if isinstance(test_items, list):
                                 for item in test_items:
-                                    # The items are already filtered by the API, so just append
                                     all_failed_test_names.append(item.get('name', 'Unknown Test'))
                                     all_failed_issue_types.append(item.get('issue_type', 'Unknown Issue Type'))
                             else:
-                                st.warning(f"Could not retrieve test items for launch {launch_id}: {test_items}")
+                                st.warning(f"Could not retrieve failed test items for launch {launch_id}: {test_items}")
+
+                        if launch_id and skipped_count > 0:
+                            test_items = rp_manager.get_test_items_for_launch(launch_id, item_filter=skipped_item_filter)
+                            if isinstance(test_items, list):
+                                for item in test_items:
+                                    all_skipped_test_names.append(item.get('name', 'Unknown Test'))
+                            else:
+                                st.warning(f"Could not retrieve skipped test items for launch {launch_id}: {test_items}")
                     
                     
                     
@@ -397,7 +441,15 @@ if prompt := st.chat_input("What is up?"):
                     else:
                         st.markdown("No failed tests found in the selected launches.")
 
-                    
+                    # Display most frequent skipped cases
+                    st.subheader("Most Frequent Skipped Cases")
+                    if all_skipped_test_names:
+                        top_skipped_tests = Counter(all_skipped_test_names).most_common(5) # Top 5 skipped tests
+                        st.markdown("**Top 5 Skipped Tests:**")
+                        for test_name, count in top_skipped_tests:
+                            st.markdown(f"- {test_name} (Skipped {count} times)")
+                    else:
+                        st.markdown("No skipped tests found in the selected launches.")
 
                     # LLM Analysis
                     if provider == "Models.corp" and client and not skip_llm_analysis:
@@ -410,6 +462,11 @@ if prompt := st.chat_input("What is up?"):
                             for test_name, count in Counter(all_failed_test_names).most_common(5):
                                 analysis_prompt += f"- {test_name} (Failed {count} times)\n"
 
+                        if all_skipped_test_names:
+                            analysis_prompt += "\nMost Frequent Skipped Tests:\n"
+                            for test_name, count in Counter(all_skipped_test_names).most_common(5):
+                                analysis_prompt += f"- {test_name} (Skipped {count} times)\n"
+
                         analysis_prompt += "\nBased on this data and the user's original request, please provide a comprehensive analysis. Focus on aspects like pass rates, test coverage across platforms, and identifying unstable tests."
                         
                         try:
@@ -421,6 +478,117 @@ if prompt := st.chat_input("What is up?"):
                             active_chat["messages"].append({"role": "assistant", "content": f"\n\nError during LLM analysis: {e}"}) # Add error to chat history
 
 
+                # --- Slidev Presentation Generation ---
+                    if st.session_state.enable_slidev:
+                        slidev_output_dir = os.path.join(os.getcwd(), "slidev_presentations")
+                        os.makedirs(slidev_output_dir, exist_ok=True)
+
+                        # Generate Slidev Markdown content
+                        slidev_content = "# ReportPortal Analysis\n\n"
+                        slidev_content += "---\n\n"
+                        slidev_content += "## ReportPortal Launches\n\n"
+                        if launches_for_charting_and_analysis:
+                            slidev_content += "| Launch Name | Pass Rate | URL |\n"
+                            slidev_content += "|---|---|---|\n"
+                            for launch in launches_for_charting_and_analysis:
+                                slidev_content += f"| {launch['name']} | {launch['pass_rate']} | [Link]({launch['url']}) |\n"
+                        else:
+                            slidev_content += "No launches found in ReportPortal with the given filter.\n"
+
+                        slidev_content += "---\n\n"
+                        slidev_content += "## Pass Rate Trend\n\n"
+                        slidev_content += f"![Pass Rate Trend](/pass_rate_trend.png)\n\n"
+
+                        slidev_content += "---\n\n"
+                        slidev_content += "## OCP Platform Test Coverage\n\n"
+                        slidev_content += f"![OCP Platform Test Coverage](/ocp_coverage.png)\n\n"
+
+                        slidev_content += "---\n\n"
+                        slidev_content += "## Most Frequent Failure Cases\n\n"
+                        if all_failed_test_names:
+                            top_failed_tests = Counter(all_failed_test_names).most_common(5)
+                            for test_name, count in top_failed_tests:
+                                slidev_content += f"- {test_name} (Failed {count} times)\n"
+                        else:
+                            slidev_content += "No failed tests found in the selected launches.\n"
+
+                        slidev_content += "---\n\n"
+                        slidev_content += "## Most Frequent Skipped Cases\n\n"
+                        if all_skipped_test_names:
+                            top_skipped_tests = Counter(all_skipped_test_names).most_common(5)
+                            for test_name, count in top_skipped_tests:
+                                slidev_content += f"- {test_name} (Skipped {count} times)\n"
+                        else:
+                            slidev_content += "No skipped tests found in the selected launches.\n"
+
+                        if 'llm_analysis_resp' in locals():
+                            slidev_content += "---\n\n"
+                            slidev_content += "## LLM Analysis\n\n"
+                            
+                            # Process LLM analysis response to add slide breaks for sub-sections
+                            processed_llm_analysis = []
+                            lines = llm_analysis_resp.splitlines()
+                            for line in lines:
+                                if line.strip().startswith("## ") or line.strip().startswith("### "):
+                                    processed_llm_analysis.append("---\n\n") # Add slide separator before new section
+                                processed_llm_analysis.append(line)
+                            
+                            slidev_content += "\n".join(processed_llm_analysis) + "\n\n"
+
+                        # Print the generated Slidev content for debugging
+                        print("DEBUG: Generated Slidev Content:\n" + slidev_content)
+
+                        # Write the content to serve.md
+                        with open(os.path.join(slidev_output_dir, "serve.md"), "w") as f:
+                            f.write(slidev_content)
+
+                        # Check if npx is available
+
+                        # Check if npx is available
+                        npx_check = subprocess.run(["which", "npx"], capture_output=True, text=True)
+                        if npx_check.returncode != 0:
+                            st.warning("npx (Node.js package runner) not found. Please install Node.js and npm to serve Slidev presentations. You can still find the Markdown file at the path mentioned.")
+                            resp += f"\n\n**Slidev Presentation:** To view, please install Node.js and npm, then go to `{slidev_output_dir}` and run `npx slidev serve`."
+                        else:
+                            if 'slidev_server_started' not in st.session_state or not st.session_state.slidev_server_started:
+                                st.info(f"Starting Slidev server in {slidev_output_dir}...")
+                                # Get the server's local IP address
+                                try:
+                                    server_ip = socket.gethostbyname(socket.gethostname())
+                                except socket.gaierror:
+                                    server_ip = "localhost" # Fallback if IP cannot be determined
+
+                                process = subprocess.Popen(
+                                    ["npx", "slidev", "--port", "3030", "--remote"], # Use a fixed port and bind to all interfaces
+                                    cwd=slidev_output_dir,
+                                    stdout=subprocess.DEVNULL, # Detach stdout
+                                    stderr=subprocess.DEVNULL, # Detach stderr
+                                    preexec_fn=os.setsid # Detach process from parent
+                                )
+                                server_url = f"http://{server_ip}:3030/" # Use server's IP
+                                st.session_state.slidev_server_url = server_url
+                                st.session_state.slidev_server_started = True
+                                resp += f"\n\n**Slidev Presentation:** [Click here to open]({server_url})\n(Slidev server started on port 3030 in the background. To access from your local machine, create an SSH tunnel:\n`ssh -L 3030:localhost:3030 user@{server_ip}`\nThen open `{server_url}` in your local browser. If the link doesn't work, port 3030 might be in use on the remote server or {server_ip} is not publicly accessible.)"
+                            else:
+                                # If server is already started, just provide the existing URL
+                                if 'slidev_server_url' in st.session_state and st.session_state.slidev_server_url:
+                                    resp += f"\n\n**Slidev Presentation:** [Click here to open]({st.session_state.slidev_server_url})\n(Server already running. Remember to use SSH tunneling if accessing remotely.)"
+                                else:
+                                    # Fallback if URL is missing but server was marked as started
+                                    try:
+                                        server_ip = socket.gethostbyname(socket.gethostname())
+                                    except socket.gaierror:
+                                        server_ip = "localhost"
+                                    server_url = f"http://{server_ip}:3030/"
+                                    st.session_state.slidev_server_url = server_url
+                                    resp += f"\n\n**Slidev Presentation:** [Click here to open]({server_url})\n(Slidev server was previously started on port 3030. Remember to use SSH tunneling if accessing remotely.)"
+
+
+                        # This is a placeholder for the "send me a link" part.
+                        # In a real scenario, you'd need a way to start a web server
+                        # and get its URL. For now, we instruct the user.
+                        # resp += f"\n\n**Slidev Presentation:** To view, go to `{slidev_output_dir}` and run `npx slidev serve`."
+                        
                 if not jenkins_handled and not rp_handled and jenkins_client:
                     jenkins_prompt = prompt
                     if prompt.lower().startswith("/jenkins"):

@@ -43,24 +43,26 @@ class ReportPortalManager:
                         launch_name = launch.get('name')
                         launch_url = f"{self.endpoint}/ui/#{self.project}/launches/all/{launch_id}" if launch_id else "N/A"
                         
-                        pass_rate = "N/A"
+                        pass_rate = "0.00%" # Initialize to a numeric string
                         total = 0
                         passed = 0
                         failed = 0
                         skipped = 0
                         defects = {}
 
-                        if 'statistics' in launch:
-                            if 'executions' in launch['statistics']:
-                                executions = launch['statistics']['executions']
-                                total = executions.get('total', 0)
-                                passed = executions.get('passed', 0)
-                                failed = executions.get('failed', 0)
-                                skipped = executions.get('skipped', 0)
-                                if total > 0:
-                                    pass_rate = f"{(passed / total * 100):.2f}%"
-                            if 'defects' in launch['statistics']:
-                                defects = launch['statistics']['defects']
+                        if 'statistics' in launch and 'executions' in launch['statistics']:
+                            executions = launch['statistics']['executions']
+                            total = executions.get('total', 0)
+                            passed = executions.get('passed', 0)
+                            failed = executions.get('failed', 0)
+                            skipped = executions.get('skipped', 0)
+                            # Calculate total as passed + failed, excluding skipped
+                            total_for_pass_rate = passed + failed
+                            if total_for_pass_rate > 0:
+                                pass_rate = f"{(passed / total_for_pass_rate * 100):.2f}%"
+                            # else: pass_rate remains "0.00%" as initialized
+                        if 'statistics' in launch and 'defects' in launch['statistics']:
+                            defects = launch['statistics']['defects']
 
                         launch_start_time = launch.get('startTime')
                         launch_attributes = launch.get('attributes', [])

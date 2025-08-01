@@ -7,3 +7,4 @@ ollama
 python-jenkins
 reportportal-client
 matplotlib
+jira

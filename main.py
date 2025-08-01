@@ -6,6 +6,7 @@ from clients.model_rest import AssistantClient
 from clients.ollama_client import OllamaClient
 from clients.jenkins_client import JenkinsClient
 from clients.rp_client import ReportPortalManager
+from clients.jira_client import JiraClient
 import truststore
 import dotenv
 import requests
@@ -34,6 +35,7 @@ if 'enable_slidev' not in st.session_state:
 # Initialize flags at a higher scope to ensure they are always defined
 jenkins_handled = False
 rp_handled = False
+jira_handled = False
 skip_llm_analysis = False
 charts_and_analysis_rendered = False
 
@@ -49,6 +51,19 @@ def get_ollama_models(host):
     except (requests.exceptions.RequestException, KeyError) as e:
         st.error(f"Failed to connect to Ollama at {host}. Please check the host address and ensure Ollama is running. Error: {e}")
         return []
+
+@st.cache_data(ttl=300) # Cache for 5 minutes
+def fetch_url_content(url):
+    """Fetches content from a given URL."""
+    if not url:
+        return ""
+    try:
+        response = requests.get(url)
+        response.raise_for_status() # Raise an HTTPError for bad responses (4xx or 5xx)
+        return response.text
+    except requests.exceptions.RequestException as e:
+        st.error(f"Failed to fetch content from {url}: {e}")
+        return ""
 
 # --- Sidebar Configuration ---
 st.sidebar.title("Configuration")
@@ -113,6 +128,40 @@ with st.sidebar.expander("ReportPortal Configuration"):
         rp_manager = ReportPortalManager(endpoint=rp_endpoint, uuid=rp_uuid, project=rp_project, verify_ssl=not disable_ssl_verification_rp)
         st.success("ReportPortal integration enabled.")
 
+with st.sidebar.expander("Jira Configuration"):
+    jira_client = None
+    jira_url = st.text_input("Jira URL", value=os.environ.get("JIRA_URL", ""))
+    jira_api_token = st.text_input("Jira Personal Access Token", value=os.environ.get("JIRA_API_TOKEN", ""), type="password")
+    jira_project_key = st.text_input("Jira Project Key (Optional)", value=os.environ.get("JIRA_PROJECT_KEY", "ACM"), help="Enter a default Jira project key to filter issues.")
+    disable_ssl_verification_jira = st.checkbox("Disable SSL Verification for Jira (Insecure)", value=True, help="Check this only if you are experiencing SSL certificate errors with Jira and understand the security implications.")
+
+    if jira_url and jira_api_token:
+        try:
+            jira_client = JiraClient(url=jira_url, api_token=jira_api_token, verify_ssl=not disable_ssl_verification_jira)
+            st.success("Jira client initialized successfully!")
+            print("DEBUG: Jira client initialized.")
+            st.session_state['jira_client_initialized'] = True # Set a session state flag
+        except Exception as e:
+            st.error(f"Failed to initialize Jira client: {e}")
+            print(f"DEBUG: Failed to initialize Jira client: {e}")
+            st.session_state['jira_client_initialized'] = False # Set a session state flag
+    else:
+        st.session_state['jira_client_initialized'] = False # Ensure flag is set if credentials are missing
+
+    print(f"DEBUG: jira_client_initialized session state: {st.session_state.get('jira_client_initialized')}")
+
+    if st.button("Test Jira Connection", key="test_jira_connection"):
+        if jira_url and jira_api_token:
+            try:
+                test_jira_client = JiraClient(url=jira_url, api_token=jira_api_token, verify_ssl=not disable_ssl_verification_jira)
+                st.success("Jira connection successful!")
+            except ConnectionError as e:
+                st.error(f"Jira connection failed: {e}")
+            except Exception as e:
+                st.error(f"An unexpected error occurred during Jira connection test: {e}")
+        else:
+            st.warning("Please fill in all Jira configuration fields to test the connection.")
+
 # --- Chat History Management ---
 MAX_CHATS = 5
 
@@ -122,6 +171,8 @@ if "active_chat_id" not in st.session_state:
     st.session_state.active_chat_id = None
 if "renaming_chat_id" not in st.session_state:
     st.session_state.renaming_chat_id = None
+if "jira_component_rules_content" not in st.session_state:
+    st.session_state.jira_component_rules_content = ""
 
 def new_chat():
     if len(st.session_state.chat_sessions) >= MAX_CHATS:
@@ -233,6 +284,26 @@ if prompt := st.chat_input("What is up?"):
 
     if prompt.strip().lower() == "/new-chat":
         new_chat()
+    # elif prompt.strip().lower().startswith("/rules add "):
+    #     rules_url = prompt.strip()[len("/rules add "):].strip()
+    #     if rules_url:
+    #         with st.spinner(f"Loading rules from {rules_url}..."):
+    #             content = fetch_url_content(rules_url)
+    #             if content:
+    #                 st.session_state.jira_component_rules_content = content
+    #                 resp = f"Successfully loaded Jira component rules from {rules_url}."
+    #             else:
+    #                 resp = f"Failed to load Jira component rules from {rules_url}. Please check the URL and try again."
+    #         with st.chat_message("assistant"):
+    #             st.markdown(resp)
+    #             active_chat["messages"].append({"role": "assistant", "content": resp})
+    #             save_chat_session()
+    #     else:
+    #         resp = "Please provide a URL for the rules file. Usage: `/rules add <url>`"
+    #         with st.chat_message("assistant"):
+    #             st.markdown(resp)
+    #             active_chat["messages"].append({"role": "assistant", "content": resp})
+    #             save_chat_session()
     elif active_chat:
         active_chat["messages"].append({"role": "user", "content": prompt})
         with st.chat_message("user"):
@@ -243,6 +314,7 @@ if prompt := st.chat_input("What is up?"):
                 resp = None
                 jenkins_handled = False
                 rp_handled = False
+                jira_handled = False
                 jenkins_command_explicit = False
 
                 print(f"DEBUG: Prompt received: {prompt}")
@@ -287,6 +359,7 @@ if prompt := st.chat_input("What is up?"):
                 if prompt.strip() == "/" or prompt.strip().lower() == "/help":
                     resp = """Available Commands:
 - `/new-chat`: Start a new chat session.
+- `/rules add <url>`: Load Jira component rules from a markdown file at the given URL.
 - Jenkins Commands (if configured):
   - `/jenkins list jobs [related to <keyword>]` or `list jenkins jobs [containing <keyword>]`
   - `/jenkins list views` or `list jenkins views`
@@ -294,6 +367,8 @@ if prompt := st.chat_input("What is up?"):
   - `/jenkins trigger job <job_name> [with params param1=value1,param2=value2]` or `trigger jenkins job <job_name> [with params param1=value1,param2=value2]`
 - ReportPortal Commands (if configured):
     - `/rp list launches [attribute_key=attribute_value]`
+- Jira Commands (if configured):
+    - `/jira query <natural_language_query>` (e.g., `/jira query globalhub bugs to be fixed in current release`)
 - General Chat: Any other query will be handled by the selected LLM (Models.corp or Ollama)."""
                     jenkins_handled = True # Mark as handled to skip LLM
                     print(f"DEBUG: Help command handled. {jenkins_handled=}")
@@ -341,6 +416,105 @@ if prompt := st.chat_input("What is up?"):
                     else:
                         resp = "I didn't understand your ReportPortal command. Try 'list launches [attribute_key=attribute_value]'."
                         rp_handled = True
+
+                # Jira Commands
+                print(f"DEBUG: Checking Jira client. jira_client is None: {jira_client is None}, jira_handled: {jira_handled}")
+                if not jenkins_handled and not rp_handled and jira_client:
+                    jira_command_explicit = False
+                    jira_prompt = prompt
+                    if prompt.lower().startswith("/jira query"):
+                        jira_prompt = prompt[len("/jira query"):].strip()
+                        jira_command_explicit = True
+                    
+                    if jira_command_explicit:
+                        if client: # Ensure LLM client is available
+                            llm_jira_prompt = f"""You are an expert in Jira JQL. Based on the following user request, generate ONLY the JQL query string. It is very important to preserve the exact names for components and versions as provided in the user request. DO NOT include the 'project' or 'component' clauses in the JQL, as these will be handled separately by the application. DO NOT include any other text or markdown, just the JQL string.
+
+User Request: {jira_prompt}
+
+Example JQL output for 'all bugs in the "Web UI" component for the "v2.1" release':
+issuetype = Bug AND fixVersion = "v2.1"
+
+Example JQL output for 'my open tasks':
+assignee = currentUser() AND status in ("To Do", "In Progress") AND issuetype = Task
+"""
+
+                            try:
+                                print(f"DEBUG: LLM Jira prompt being sent: {llm_jira_prompt}")
+                                if provider == "ollama":
+                                    llm_response = client.chat(model=ollama_model, messages=[{"role": "user", "content": llm_jira_prompt}])
+                                else: # For Models.corp
+                                    llm_response = client.chat([{"role": "user", "content": llm_jira_prompt}])
+                                
+                                print(f"DEBUG: LLM raw response for Jira: {llm_response}")
+                                
+                                # Extract JQL from code block or use directly
+                                jql_match = re.search(r"```(?:jql)?\n(.*?)```", llm_response, re.DOTALL)
+                                if jql_match:
+                                    llm_generated_jql = jql_match.group(1).strip()
+                                else:
+                                    llm_generated_jql = llm_response.strip()
+
+                                # Ensure a default JQL if LLM returns nothing useful
+                                if not llm_generated_jql:
+                                    llm_generated_jql = "ORDER BY created DESC"
+
+                                # Extract component from the prompt
+                                component_match = re.search(r"([a-zA-Z\s]+) bugs", jira_prompt)
+                                components = [component_match.group(1).strip()] if component_match else None
+
+                                # Explicitly prepend project to JQL, and filter out any project clauses LLM might have added
+                                # This ensures the configured jira_project_key is always used.
+                                cleaned_jql_parts = [part.strip() for part in llm_generated_jql.split(' AND ') if not part.strip().lower().startswith('project =')]
+                                final_jql_query = f"project = \"{jira_project_key}\" AND {' AND '.join(cleaned_jql_parts)}"
+                                
+                                # Remove redundant 'AND' if cleaned_jql_parts was empty
+                                if final_jql_query.endswith(' AND '):
+                                    final_jql_query = final_jql_query[:-len(' AND ')]
+                                
+                                # If only project was left, ensure it's a valid JQL
+                                if final_jql_query.strip() == f"project = \"{jira_project_key}\"".strip() and not cleaned_jql_parts:
+                                    final_jql_query = f"project = \"{jira_project_key}\" ORDER BY created DESC"
+
+                                # If the prompt is about issues "to be fixed", ensure we only get open issues.
+                                if "to be fixed" in jira_prompt.lower() and "status" not in final_jql_query.lower():
+                                    final_jql_query += ' AND status != "Closed"'
+                                    print(f"DEBUG: Appended 'status != Closed' to JQL. New query: {final_jql_query}")
+                                
+                                print(f"DEBUG: Final JQL query for Jira: {final_jql_query}")
+                                print(f"DEBUG: Calling jira_client.query_issues with project_key={jira_project_key}, components={components}")
+                                
+                                issues = jira_client.query_issues(final_jql_query, project_key=jira_project_key, components=components)
+                                
+                                print(f"DEBUG: Jira client raw response type: {type(issues)}")
+                                print(f"DEBUG: Jira client raw response: {issues}")
+
+                                if isinstance(issues, list):
+                                    if issues:
+                                        table_header = "| Key | Summary | Status | Priority | Assignee |\n|---|---|---|---|---|\n"
+                                        table_rows = []
+                                        for issue in issues:
+                                            issue_url = issue.get('url', f"{jira_client.url}/browse/{issue['key']}")
+                                            table_rows.append(f"| [{issue['key']}]({issue_url}) | {issue['summary']} | {issue['status']} | {issue['priority']} | {issue['assignee']} |")
+                                        resp = "### Jira Issues:\n" + table_header + "\n".join(table_rows)
+                                    else:
+                                        resp = "No Jira issues found with the given query."
+                                else:
+                                    resp = issues # Error message from client
+                                
+                                jira_handled = True
+                                skip_llm_analysis = True
+                            except Exception as e:
+                                resp = f"An error occurred during Jira query processing: {e}. Raw LLM response: {llm_response}"
+                                jira_handled = True # Set to True even on error to prevent fallback
+                        else:
+                            resp = "LLM client is not configured. Cannot process natural language Jira queries."
+                            jira_handled = True
+                    
+                    if not jira_handled and jira_command_explicit:
+                        resp = "I didn't understand your Jira command. Try '/jira query <natural_language_query>'."
+                        jira_handled = True
+                        print(f"DEBUG: Jira explicit command not understood. resp: {resp}")
 
                 # Common charting and LLM analysis for ReportPortal data
                 if rp_handled and 'rp_launches_data' in st.session_state and st.session_state['rp_launches_data'] and not charts_and_analysis_rendered:
@@ -657,9 +831,9 @@ if prompt := st.chat_input("What is up?"):
                                 resp += f"- **Description:** {info.get('description', 'N/A')}\n"
                                 resp += f"- **URL:** {info.get('url', 'N/A')}\n"
                                 resp += f"- **Buildable:** {info.get('buildable', 'N/A')}\n"
-                                resp += f"- **Last Build:** {info.get('lastBuild', {}).get('number', 'N/A')} (URL: {info.get('lastBuild', {}).get('url', 'N/A')})\n"
-                                resp += f"- **Last Successful Build:** {info.get('lastSuccessfulBuild', {}).get('number', 'N/A')}\n"
-                                resp += f"- **Last Failed Build:** {info.get('lastFailedBuild', {}).get('number', 'N/A')}\n"
+                                resp += f"- **Last Build:** {info.get('lastBuild', {{}}).get('number', 'N/A')} (URL: {info.get('lastBuild', {{}}).get('url', 'N/A')})\n"
+                                resp += f"- **Last Successful Build:** {info.get('lastSuccessfulBuild', {{}}).get('number', 'N/A')}\n"
+                                resp += f"- **Last Failed Build:** {info.get('lastFailedBuild', {{}}).get('number', 'N/A')}\n"
                                 resp += f"- **Health Report:**\n"
                                 health_report = info.get('healthReport', [])
                                 if health_report:
@@ -698,7 +872,7 @@ if prompt := st.chat_input("What is up?"):
                         jenkins_handled = True # Ensure it's handled by Jenkins logic, even if unrecognized
                         print(f"DEBUG: Jenkins explicit command not understood. resp: {resp}")
 
-                if not jenkins_handled and not rp_handled:
+                if not jenkins_handled and not rp_handled and not jira_handled:
                     try:
                         if client:
                             if provider == "ollama":

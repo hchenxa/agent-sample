@@ -69,6 +69,29 @@ class JiraClient:
         except Exception as e:
             return f"An unexpected error occurred: {e}"
 
+    def get_current_user(self):
+        """
+        Retrieves the details of the currently authenticated user.
+
+        Returns:
+            dict: A dictionary containing user details, or an error message.
+        """
+        if not self.jira:
+            return "Jira connection not established."
+        
+        try:
+            user = self.jira.myself()
+            return {
+                'name': user.get('name', 'N/A'),
+                'displayName': user.get('displayName', 'N/A'),
+                'emailAddress': user.get('emailAddress', 'N/A'),
+                'timeZone': user.get('timeZone', 'N/A')
+            }
+        except JIRAError as e:
+            return f"Error retrieving user information: {e.text}"
+        except Exception as e:
+            return f"An unexpected error occurred: {e}"
+
 if __name__ == '__main__':
     # Example Usage:
     # Set these environment variables or replace with your actual Jira credentials

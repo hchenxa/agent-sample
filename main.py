@@ -281,6 +281,7 @@ if prompt := st.chat_input("What is up?"):
     jenkins_handled = False
     rp_handled = False
     skip_llm_analysis = False
+    jira_command_handled_successfully = False
 
     if prompt.strip().lower() == "/new-chat":
         new_chat()
@@ -314,7 +315,6 @@ if prompt := st.chat_input("What is up?"):
                 resp = None
                 jenkins_handled = False
                 rp_handled = False
-                jira_handled = False
                 jenkins_command_explicit = False
 
                 print(f"DEBUG: Prompt received: {prompt}")
@@ -369,6 +369,7 @@ if prompt := st.chat_input("What is up?"):
     - `/rp list launches [attribute_key=attribute_value]`
 - Jira Commands (if configured):
     - `/jira query <natural_language_query>` (e.g., `/jira query globalhub bugs to be fixed in current release`)
+    - `/jira whoami`: Get information about the current Jira user.
 - General Chat: Any other query will be handled by the selected LLM (Models.corp or Ollama)."""
                     jenkins_handled = True # Mark as handled to skip LLM
                     print(f"DEBUG: Help command handled. {jenkins_handled=}")
@@ -418,19 +419,41 @@ if prompt := st.chat_input("What is up?"):
                         rp_handled = True
 
                 # Jira Commands
-                print(f"DEBUG: Checking Jira client. jira_client is None: {jira_client is None}, jira_handled: {jira_handled}")
+                print(f"DEBUG: Checking Jira client. jira_client is None: {jira_client is None}, jira_command_handled_successfully: {jira_command_handled_successfully}")
                 if not jenkins_handled and not rp_handled and jira_client:
-                    jira_command_explicit = False
                     jira_prompt = prompt
-                    if prompt.lower().startswith("/jira query"):
-                        jira_prompt = prompt[len("/jira query"):].strip()
-                        jira_command_explicit = True
                     
-                    if jira_command_explicit:
+                    if jira_prompt.lower().strip() == "/jira whoami":
+                        print(f"DEBUG: Entered /jira whoami block. jira_client: {jira_client})")
+                        user_info = jira_client.get_current_user()
+                        print(f"DEBUG: user_info from jira_client.get_current_user(): {user_info})")
+                        if isinstance(user_info, dict):
+                            resp = f"### Current Jira User:\n\n"
+                            resp += f"- **Display Name:** {user_info.get('displayName', 'N/A')}\n"
+                            resp += f"- **Email:** {user_info.get('emailAddress', 'N/A')}\n"
+                            resp += f"- **Time Zone:** {user_info.get('timeZone', 'N/A')}\n"
+                        else:
+                            resp = user_info # Error message
+                        print(f"DEBUG: resp after whoami processing: {resp})")
+                        jira_command_handled_successfully = True
+                        skip_llm_analysis = True
+                        jira_handled = True
+                    elif prompt.lower().startswith("/jira query"):
+                        jira_prompt = prompt[len("/jira query"):].strip()
                         if client: # Ensure LLM client is available
-                            llm_jira_prompt = f"""You are an expert in Jira JQL. Based on the following user request, generate ONLY the JQL query string. It is very important to preserve the exact names for components and versions as provided in the user request. DO NOT include the 'project' or 'component' clauses in the JQL, as these will be handled separately by the application. DO NOT include any other text or markdown, just the JQL string.
+                            # Programmatically handle date ranges and remove them from the prompt before sending to LLM
+                            date_jql = ""
+                            clean_jira_prompt = jira_prompt
+                            if "last month" in jira_prompt.lower():
+                                date_jql = "AND updated >= startOfMonth(-1) AND updated <= endOfMonth(-1)"
+                                clean_jira_prompt = clean_jira_prompt.lower().replace("last month", "").strip()
+                            elif "this month" in jira_prompt.lower():
+                                date_jql = "AND updated >= startOfMonth() AND updated <= endOfMonth()"
+                                clean_jira_prompt = clean_jira_prompt.lower().replace("this month", "").strip()
 
-User Request: {jira_prompt}
+                            llm_jira_prompt = f"""You are an expert in Jira JQL. Based on the following user request, generate ONLY the JQL query string. It is very important to preserve the exact names for components and versions as provided in the user request. DO NOT include the 'project', 'component', or any date-related clauses (like 'created', 'updated', or 'duedate') in the JQL, as these will be handled separately by the application. DO NOT include any other text or markdown, just the JQL string.
+
+User Request: {clean_jira_prompt}
 
 Example JQL output for 'all bugs in the "Web UI" component for the "v2.1" release':
 issuetype = Bug AND fixVersion = "v2.1"
@@ -466,20 +489,30 @@ assignee = currentUser() AND status in ("To Do", "In Progress") AND issuetype = 
                                 # Explicitly prepend project to JQL, and filter out any project clauses LLM might have added
                                 # This ensures the configured jira_project_key is always used.
                                 cleaned_jql_parts = [part.strip() for part in llm_generated_jql.split(' AND ') if not part.strip().lower().startswith('project =')]
-                                final_jql_query = f"project = \"{jira_project_key}\" AND {' AND '.join(cleaned_jql_parts)}"
+                                base_jql = ' AND '.join(cleaned_jql_parts)
                                 
-                                # Remove redundant 'AND' if cleaned_jql_parts was empty
-                                if final_jql_query.endswith(' AND '):
-                                    final_jql_query = final_jql_query[:-len(' AND ')]
+                                # Start with the project key
+                                final_jql_query = f'project = "{jira_project_key}"'
                                 
-                                # If only project was left, ensure it's a valid JQL
-                                if final_jql_query.strip() == f"project = \"{jira_project_key}\"".strip() and not cleaned_jql_parts:
-                                    final_jql_query = f"project = \"{jira_project_key}\" ORDER BY created DESC"
+                                # Add the base JQL from the LLM if it's not empty
+                                if base_jql:
+                                    final_jql_query += f" AND {base_jql}"
+
+                                # Add the programmatically generated date JQL
+                                if date_jql:
+                                    final_jql_query += f" {date_jql}"
 
                                 # If the prompt is about issues "to be fixed", ensure we only get open issues.
                                 if "to be fixed" in jira_prompt.lower() and "status" not in final_jql_query.lower():
                                     final_jql_query += ' AND status != "Closed"'
                                     print(f"DEBUG: Appended 'status != Closed' to JQL. New query: {final_jql_query}")
+
+                                # if the prompt is about issues "assigned to me", get the current user and add it to the query
+                                if "assigned to me" in jira_prompt.lower() and "assignee" not in final_jql_query.lower():
+                                    user_info = jira_client.get_current_user()
+                                    if isinstance(user_info, dict):
+                                        final_jql_query += f" AND assignee = {user_info.get('name')}"
+                                        print(f"DEBUG: Appended 'assignee' to JQL. New query: {final_jql_query}")
                                 
                                 print(f"DEBUG: Final JQL query for Jira: {final_jql_query}")
                                 print(f"DEBUG: Calling jira_client.query_issues with project_key={jira_project_key}, components={components}")
@@ -502,18 +535,17 @@ assignee = currentUser() AND status in ("To Do", "In Progress") AND issuetype = 
                                 else:
                                     resp = issues # Error message from client
                                 
-                                jira_handled = True
+                                jira_command_handled_successfully = True
                                 skip_llm_analysis = True
                             except Exception as e:
                                 resp = f"An error occurred during Jira query processing: {e}. Raw LLM response: {llm_response}"
-                                jira_handled = True # Set to True even on error to prevent fallback
+                                jira_command_handled_successfully = True # Set to True even on error to prevent fallback
                         else:
                             resp = "LLM client is not configured. Cannot process natural language Jira queries."
-                            jira_handled = True
                     
-                    if not jira_handled and jira_command_explicit:
-                        resp = "I didn't understand your Jira command. Try '/jira query <natural_language_query>'."
-                        jira_handled = True
+                    # Only show this if no Jira command was recognized
+                    elif not jira_command_handled_successfully:
+                        resp = "I didn't understand your Jira command. Try '/jira query <natural_language_query>' or '/jira whoami'."
                         print(f"DEBUG: Jira explicit command not understood. resp: {resp}")
 
                 # Common charting and LLM analysis for ReportPortal data
@@ -872,7 +904,7 @@ assignee = currentUser() AND status in ("To Do", "In Progress") AND issuetype = 
                         jenkins_handled = True # Ensure it's handled by Jenkins logic, even if unrecognized
                         print(f"DEBUG: Jenkins explicit command not understood. resp: {resp}")
 
-                if not jenkins_handled and not rp_handled and not jira_handled:
+                if not jenkins_handled and not rp_handled and not jira_command_handled_successfully:
                     try:
                         if client:
                             if provider == "ollama":

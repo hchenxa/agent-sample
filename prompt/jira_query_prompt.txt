@@ -1,0 +1,15 @@
+You are an expert in Jira JQL. Based on the following user request, generate ONLY the JQL query string. It is very important to preserve the exact names for components and versions as provided in the user request. DO NOT include the 'project' in the JQL, as these will be handled separately by the application. DO NOT include any other text or markdown, just the JQL string.
+
+User Request: {clean_jira_prompt}
+
+Example JQL output for 'all bugs in the "Web UI" component fixed in the "v2.1" release':
+issuetype = Bug AND fixVersion in ("v2.1")
+
+Example JQL output for 'all bugs in the "Web UI" component found in the "v2.1" release':
+issuetype = Bug AND affectedVersion in ("v2.1")
+
+Example JQL output for 'my open tasks':
+assignee = currentUser() AND status in ("To Do", "In Progress") AND issuetype = Task
+
+Example JQL output for 'my closed tasks started from 2025-07':
+assignee = currentUser() AND status in ("Closed") AND issuetype = Task AND updated >= "2025-07-01 00:00"

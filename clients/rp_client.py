@@ -5,7 +5,17 @@ import urllib.parse
 import logging
 
 class ReportPortalManager:
+    """Manages interactions with the ReportPortal API to retrieve launch and test item data."""
     def __init__(self, endpoint, uuid, project, verify_ssl=True):
+        """
+        Initializes the ReportPortalManager.
+
+        Args:
+            endpoint (str): The ReportPortal API endpoint URL.
+            uuid (str): The ReportPortal API UUID (personal access token).
+            project (str): The ReportPortal project name.
+            verify_ssl (bool, optional): Whether to verify SSL certificates. Defaults to True.
+        """
         self.endpoint = endpoint
         self.uuid = uuid
         self.project = project
@@ -13,6 +23,15 @@ class ReportPortalManager:
         self.session = Session()
 
     def get_launches(self, attribute_filter=None):
+        """
+        Retrieves a list of launches from ReportPortal, optionally filtered by attributes.
+
+        Args:
+            attribute_filter (str, optional): A comma-separated string of attribute filters (e.g., "component:foo,release:bar").
+
+        Returns:
+            list: A list of dictionaries, each representing a formatted launch, or an error message string.
+        """
         if self.endpoint and self.project and self.uuid:
             try:
                 headers = {
@@ -31,19 +50,18 @@ class ReportPortalManager:
                 launches_data = response.json()
                 print(f"DEBUG: Raw launches_data from ReportPortal: {launches_data}")
                 
-                # ReportPortal API for launches usually returns a 'content' field with a list of launches
+                # ReportPortal API for launches usually returns a 'content' field with a list of launches.
                 if 'content' in launches_data and isinstance(launches_data['content'], list):
-                    # Extract relevant information: name, id, and construct a UI URL
-                    # The UI URL construction might vary based on ReportPortal setup.
-                    # A common pattern is {endpoint}/ui/#{projectName}/launches/all/{launchId}
+                    # Extract relevant information (name, id, URL, pass rate, statistics) and format it.
                     formatted_launches = []
                     for launch in launches_data['content']:
                         print(f"DEBUG: Raw launch data before formatting: {launch}")
                         launch_id = launch.get('id')
                         launch_name = launch.get('name')
+                        # Construct the UI URL based on common ReportPortal patterns.
                         launch_url = f"{self.endpoint}/ui/#{self.project}/launches/all/{launch_id}" if launch_id else "N/A"
                         
-                        pass_rate = "0.00%" # Initialize to a numeric string
+                        pass_rate = "0.00%" # Initialize pass rate as a string.
                         total = 0
                         passed = 0
                         failed = 0
@@ -56,11 +74,10 @@ class ReportPortalManager:
                             passed = executions.get('passed', 0)
                             failed = executions.get('failed', 0)
                             skipped = executions.get('skipped', 0)
-                            # Calculate total as passed + failed, excluding skipped
+                            # Calculate pass rate based on passed and failed tests.
                             total_for_pass_rate = passed + failed
                             if total_for_pass_rate > 0:
                                 pass_rate = f"{(passed / total_for_pass_rate * 100):.2f}%"
-                            # else: pass_rate remains "0.00%" as initialized
                         if 'statistics' in launch and 'defects' in launch['statistics']:
                             defects = launch['statistics']['defects']
 
@@ -68,7 +85,7 @@ class ReportPortalManager:
                         launch_attributes = launch.get('attributes', [])
                         formatted_launches.append({
                             'name': launch_name,
-                            'id': launch_id, # Add launch_id here
+                            'id': launch_id, 
                             'url': launch_url,
                             'pass_rate': pass_rate,
                             'total': total,
@@ -89,13 +106,22 @@ class ReportPortalManager:
         return "ReportPortal configuration incomplete (endpoint, UUID, or project missing)."
 
     def get_test_items_for_launch(self, launch_id, item_filter=None):
+        """
+        Retrieves test items for a specific ReportPortal launch, optionally filtered.
+
+        Args:
+            launch_id (int): The ID of the launch to retrieve test items from.
+            item_filter (str, optional): A filter string for test items (e.g., "filter.eq.status=FAILED").
+
+        Returns:
+            list: A list of dictionaries, each representing a formatted test item, or an error message string.
+        """
         if self.endpoint and self.project and self.uuid and launch_id:
             try:
                 headers = {
                     "Authorization": f"Bearer {self.uuid}"
                 }
-                # ReportPortal API to get test items for a specific launch
-                # Assuming a common endpoint structure, adjust if different
+                # Construct the URL to get test items for a specific launch.
                 url = f"{self.endpoint}/api/v1/{self.project}/item?filter.eq.launchId={launch_id}&page.size=1000"
                 if item_filter:
                     url += f"&{item_filter}"

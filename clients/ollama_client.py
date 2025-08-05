@@ -1,6 +1,7 @@
 import ollama
 
 class OllamaClient:
+    """A client for interacting with Ollama models for text generation and chat."""
     def __init__(self, host="http://localhost:11434"):
         # The ollama library automatically uses OLLAMA_HOST environment variable
         # or defaults to http://localhost:11434.

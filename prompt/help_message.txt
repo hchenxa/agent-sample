@@ -1,0 +1,14 @@
+Available Commands:
+- `/new-chat`: Start a new chat session.
+- `/rules add <url>`: Load Jira component rules from a markdown file at the given URL.
+- Jenkins Commands (if configured):
+  - `/jenkins list jobs [related to <keyword>]` or `list jenkins jobs [containing <keyword>]`
+  - `/jenkins list views` or `list jenkins views`
+  - `/jenkins check job <job_name>` or `check jenkins job <job_name>`
+  - `/jenkins trigger job <job_name> [with params param1=value1,param2=value2]` or `trigger jenkins job <job_name> [with params param1=value1,param2=value2]`
+- ReportPortal Commands (if configured):
+    - `/rp list launches [attribute_key=attribute_value]`
+- Jira Commands (if configured):
+    - `/jira query <natural_language_query>` (e.g., `/jira query globalhub bugs to be fixed in current release`)
+    - `/jira whoami`: Get information about the current Jira user.
+- General Chat: Any other query will be handled by the selected LLM (Models.corp or Ollama).

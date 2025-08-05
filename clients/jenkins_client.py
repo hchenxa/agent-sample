@@ -107,7 +107,7 @@ class JenkinsClient:
             return f"Error fetching parameters for build {build_number} of job '{job_name}': {e}"
 
 if __name__ == '__main__':
-    # Example Usage (replace with your Jenkins details)
+    # Example Usage: Replace with your Jenkins details and uncomment to run.
     JENKINS_URL = 'http://localhost:8080'
     JENKINS_USERNAME = 'your_username'
     JENKINS_API_TOKEN = 'your_api_token'
@@ -119,24 +119,22 @@ if __name__ == '__main__':
         jobs = client.get_all_jobs()
         print(jobs)
 
-        # Example: Get info for a specific job
+        # # Example: Get info for a specific job
         # job_name = 'your_job_name'
-        # print(f"\n--- Info for job '{job_name}' ---")
         # info = client.get_job_info(job_name)
-        # print(info)
+        # print(f"\n--- Info for job '{job_name}' ---\n{info}")
 
-        # Example: Trigger a job
+        # # Example: Trigger a job
         # job_to_trigger = 'your_job_name'
-        # print(f"\n--- Triggering job '{job_to_trigger}' ---")
         # trigger_result = client.build_job(job_to_trigger)
-        # print(trigger_result)
+        # print(f"\n--- Triggering job '{job_to_trigger}' ---\n{trigger_result}")
 
-        # Example: Trigger a job with parameters
+        # # Example: Trigger a job with parameters
         # job_with_params = 'your_parameterized_job_name'
         # params = {'PARAM1': 'value1', 'PARAM2': 'value2'}
-        # print(f"\n--- Triggering job '{job_with_params}' with parameters ---")
         # trigger_result_params = client.build_job(job_with_params, params)
-        # print(trigger_result_params)
+        # print(f"\n--- Triggering job '{job_with_params}' with parameters ---\n{trigger_result_params}")
 
     except Exception as e:
         print(f"An error occurred during Jenkins client example usage: {e}")
+

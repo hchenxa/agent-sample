@@ -1,30 +1,21 @@
 import os
 import argparse
-import sys
 import streamlit as st
-from clients.model_rest import AssistantClient
-from clients.ollama_client import OllamaClient
-from clients.jenkins_client import JenkinsClient
-from clients.rp_client import ReportPortalManager
-from clients.jira_client import JiraClient
-import truststore
 import dotenv
-import requests
-import yaml
 import uuid
 import re
 import pandas as pd
 from collections import Counter
 import matplotlib.pyplot as plt
 import subprocess
-import select
 import socket
-import io
-import base64
+from utils.config_manager import setup_configurations
+from utils.chat_history_manager import new_chat, get_active_chat, save_chat_session, render_chat_history_sidebar
+from utils.config_manager import setup_configurations
+from utils.chat_history_manager import new_chat, get_active_chat, save_chat_session, render_chat_history_sidebar
 
 dotenv.load_dotenv()
 
-# --- Argument Parsing ---
 parser = argparse.ArgumentParser(description="Run Echo Chatbot with optional features.")
 parser.add_argument('--enable-slidev', action='store_true', help='Enable Slidev presentation generation for ReportPortal reports.')
 args, unknown = parser.parse_known_args()
@@ -39,131 +30,11 @@ jira_handled = False
 skip_llm_analysis = False
 charts_and_analysis_rendered = False
 
-# --- Helper Functions ---
-@st.cache_data(ttl=60)
-def get_ollama_models(host):
-    """Fetches the list of models from an Ollama host."""
-    try:
-        response = requests.get(f"{host}/api/tags")
-        response.raise_for_status()
-        models = response.json().get("models", [])
-        return [model["name"] for model in models]
-    except (requests.exceptions.RequestException, KeyError) as e:
-        st.error(f"Failed to connect to Ollama at {host}. Please check the host address and ensure Ollama is running. Error: {e}")
-        return []
+client, jenkins_client, rp_manager, jira_client, jira_project_key, provider, ollama_model = setup_configurations()
 
-@st.cache_data(ttl=300) # Cache for 5 minutes
-def fetch_url_content(url):
-    """Fetches content from a given URL."""
-    if not url:
-        return ""
-    try:
-        response = requests.get(url)
-        response.raise_for_status() # Raise an HTTPError for bad responses (4xx or 5xx)
-        return response.text
-    except requests.exceptions.RequestException as e:
-        st.error(f"Failed to fetch content from {url}: {e}")
-        return ""
-
-# --- Sidebar Configuration ---
-st.sidebar.title("Configuration")
-
-provider = st.sidebar.selectbox("Provider", ["Models.corp", "ollama"])
-
-client = None
-
-if provider == "Models.corp":
-    model_api = st.sidebar.text_input("Model API", value=os.environ.get("MODEL_API", ""))
-    model_id = st.sidebar.text_input("Model ID", value=os.environ.get("MODEL_ID", ""))
-    access_token = st.sidebar.text_input("Access Token", value=os.environ.get("ACCESS_TOKEN", ""), type="password")
-    disable_ssl_verification = st.sidebar.checkbox("Disable SSL Verification (Insecure)", value=True, help="Check this only if you are experiencing SSL certificate errors and understand the security implications.")
-
-    truststore.inject_into_ssl()
-
-    if model_api and model_id and access_token:
-        client = AssistantClient(base_url=model_api, model=model_id, api_key=access_token, verify_ssl=not disable_ssl_verification)
-    else:
-        st.warning("Please configure the Models.corp credentials in the sidebar.")
-        st.stop()
-
-elif provider == "ollama":
-    ollama_host = st.sidebar.text_input("Ollama Host", value=os.environ.get("OLLAMA_HOST", "http://localhost:11434"))
-    
-    if ollama_host:
-        available_models = get_ollama_models(ollama_host)
-        if available_models:
-            ollama_model = st.sidebar.selectbox("Ollama Model", available_models)
-            client = OllamaClient(host=ollama_host)
-        else:
-            st.warning("Could not fetch models from Ollama. Please ensure the host is correct and running.")
-            st.stop()
-    else:
-        st.warning("Please configure the Ollama host in the sidebar.")
-        st.stop()
-
-
-with st.sidebar.expander("Jenkins Configuration"):
-    jenkins_client = None
-    jenkins_url = st.text_input("Jenkins URL", value=os.environ.get("JENKINS_URL", ""))
-    jenkins_username = st.text_input("Jenkins Username", value=os.environ.get("JENKINS_USERNAME", ""))
-    jenkins_api_token = st.text_input("Jenkins API Token", value=os.environ.get("JENKINS_API_TOKEN", ""), type="password")
-
-    if jenkins_url and jenkins_username and jenkins_api_token:
-        try:
-            jenkins_client = JenkinsClient(url=jenkins_url, username=jenkins_username, password=jenkins_api_token)
-            st.success("Jenkins client initialized successfully!")
-            print("DEBUG: Jenkins client initialized.")
-        except Exception as e:
-            st.error(f"Failed to initialize Jenkins client: {e}")
-            print(f"DEBUG: Failed to initialize Jenkins client: {e}")
-
-with st.sidebar.expander("ReportPortal Configuration"):
-    rp_manager = None
-    rp_endpoint = st.text_input("ReportPortal Endpoint", value=os.environ.get("RP_ENDPOINT", ""))
-    rp_uuid = st.text_input("ReportPortal UUID", value=os.environ.get("RP_UUID", ""), type="password")
-    rp_project = st.text_input("ReportPortal Project", value=os.environ.get("RP_PROJECT", ""))
-    disable_ssl_verification_rp = st.checkbox("Disable SSL Verification for ReportPortal (Insecure)", value=True, help="Check this only if you are experiencing SSL certificate errors with ReportPortal and understand the security implications.")
-    
-    if rp_endpoint and rp_uuid and rp_project:
-        rp_manager = ReportPortalManager(endpoint=rp_endpoint, uuid=rp_uuid, project=rp_project, verify_ssl=not disable_ssl_verification_rp)
-        st.success("ReportPortal integration enabled.")
-
-with st.sidebar.expander("Jira Configuration"):
-    jira_client = None
-    jira_url = st.text_input("Jira URL", value=os.environ.get("JIRA_URL", ""))
-    jira_api_token = st.text_input("Jira Personal Access Token", value=os.environ.get("JIRA_API_TOKEN", ""), type="password")
-    jira_project_key = st.text_input("Jira Project Key (Optional)", value=os.environ.get("JIRA_PROJECT_KEY", "ACM"), help="Enter a default Jira project key to filter issues.")
-    disable_ssl_verification_jira = st.checkbox("Disable SSL Verification for Jira (Insecure)", value=True, help="Check this only if you are experiencing SSL certificate errors with Jira and understand the security implications.")
-
-    if jira_url and jira_api_token:
-        try:
-            jira_client = JiraClient(url=jira_url, api_token=jira_api_token, verify_ssl=not disable_ssl_verification_jira)
-            st.success("Jira client initialized successfully!")
-            print("DEBUG: Jira client initialized.")
-            st.session_state['jira_client_initialized'] = True # Set a session state flag
-        except Exception as e:
-            st.error(f"Failed to initialize Jira client: {e}")
-            print(f"DEBUG: Failed to initialize Jira client: {e}")
-            st.session_state['jira_client_initialized'] = False # Set a session state flag
-    else:
-        st.session_state['jira_client_initialized'] = False # Ensure flag is set if credentials are missing
-
-    print(f"DEBUG: jira_client_initialized session state: {st.session_state.get('jira_client_initialized')}")
-
-    if st.button("Test Jira Connection", key="test_jira_connection"):
-        if jira_url and jira_api_token:
-            try:
-                test_jira_client = JiraClient(url=jira_url, api_token=jira_api_token, verify_ssl=not disable_ssl_verification_jira)
-                st.success("Jira connection successful!")
-            except ConnectionError as e:
-                st.error(f"Jira connection failed: {e}")
-            except Exception as e:
-                st.error(f"An unexpected error occurred during Jira connection test: {e}")
-        else:
-            st.warning("Please fill in all Jira configuration fields to test the connection.")
-
-# --- Chat History Management ---
-MAX_CHATS = 5
+def read_prompt_file(filename):
+    with open(os.path.join("prompt", filename), "r") as f:
+        return f.read()
 
 if "chat_sessions" not in st.session_state:
     st.session_state.chat_sessions = []
@@ -174,96 +45,7 @@ if "renaming_chat_id" not in st.session_state:
 if "jira_component_rules_content" not in st.session_state:
     st.session_state.jira_component_rules_content = ""
 
-def new_chat():
-    if len(st.session_state.chat_sessions) >= MAX_CHATS:
-        st.sidebar.error(f"Max chats ({MAX_CHATS}) reached. Delete one to create a new chat.")
-        return
-    
-    # Save current chat if it has messages
-    if st.session_state.active_chat_id and get_active_chat()["messages"]:
-        save_chat_session()
-
-    chat_id = str(uuid.uuid4())
-    st.session_state.chat_sessions.append({"id": chat_id, "name": "New Chat", "messages": []})
-    st.session_state.active_chat_id = chat_id
-    st.rerun()
-
-def switch_chat(chat_id):
-    st.session_state.active_chat_id = chat_id
-    st.session_state.renaming_chat_id = None
-    st.rerun()
-
-def delete_chat(chat_id):
-    st.session_state.chat_sessions = [chat for chat in st.session_state.chat_sessions if chat["id"] != chat_id]
-    if st.session_state.active_chat_id == chat_id:
-        st.session_state.active_chat_id = st.session_state.chat_sessions[0]["id"] if st.session_state.chat_sessions else None
-    st.rerun()
-
-def rename_chat(chat_id):
-    new_name = st.session_state[f"new_name_{chat_id}"]
-    for session in st.session_state.chat_sessions:
-        if session["id"] == chat_id:
-            session["name"] = new_name
-            break
-    st.session_state.renaming_chat_id = None
-    st.rerun()
-
-def get_active_chat():
-    if not st.session_state.active_chat_id:
-        if not st.session_state.chat_sessions:
-            # If no chats exist, create one
-            chat_id = str(uuid.uuid4())
-            st.session_state.chat_sessions.append({"id": chat_id, "name": "New Chat", "messages": []})
-            st.session_state.active_chat_id = chat_id
-        else:
-            st.session_state.active_chat_id = st.session_state.chat_sessions[0]["id"]
-    
-    for session in st.session_state.chat_sessions:
-        if session["id"] == st.session_state.active_chat_id:
-            return session
-    
-    # Fallback in case active_chat_id is invalid
-    if st.session_state.chat_sessions:
-        st.session_state.active_chat_id = st.session_state.chat_sessions[0]["id"]
-        return st.session_state.chat_sessions[0]
-    
-    # If all fallbacks fail, create a new chat
-    chat_id = str(uuid.uuid4())
-    st.session_state.chat_sessions.append({"id": chat_id, "name": "New Chat", "messages": []})
-    st.session_state.active_chat_id = chat_id
-    return st.session_state.chat_sessions[0]
-
-
-def save_chat_session():
-    active_chat = get_active_chat()
-    if active_chat and active_chat["messages"] and active_chat["name"] == "New Chat":
-        first_user_message = next((msg["content"] for msg in active_chat["messages"] if msg["role"] == "user"), "Chat")
-        active_chat["name"] = first_user_message[:30] + "..." if len(first_user_message) > 30 else first_user_message
-
-# --- Sidebar Chat History ---
-with st.sidebar.expander("Chat History", expanded=True):
-    for session in st.session_state.chat_sessions:
-        if st.session_state.renaming_chat_id == session["id"]:
-            st.text_input(
-                "New name",
-                value=session["name"],
-                on_change=rename_chat,
-                args=(session["id"],),
-                key=f"new_name_{session['id']}"
-            )
-        else:
-            col1, col2, col3 = st.columns([3, 1, 1])
-            with col1:
-                if st.button(session["name"], key=f"switch_{session['id']}", use_container_width=True):
-                    switch_chat(session["id"])
-            with col2:
-                if st.button("✏️", key=f"rename_{session['id']}"):
-                    st.session_state.renaming_chat_id = session["id"]
-                    st.rerun()
-            with col3:
-                if st.button("X", key=f"delete_{session['id']}"):
-                    delete_chat(session["id"])
-
+render_chat_history_sidebar()
 
 # --- Main App Layout ---
 st.title("Echo Chatbot")
@@ -357,20 +139,7 @@ if prompt := st.chat_input("What is up?"):
                             print(f"DEBUG: rp_handled set to {rp_handled}")
 
                 if prompt.strip() == "/" or prompt.strip().lower() == "/help":
-                    resp = """Available Commands:
-- `/new-chat`: Start a new chat session.
-- `/rules add <url>`: Load Jira component rules from a markdown file at the given URL.
-- Jenkins Commands (if configured):
-  - `/jenkins list jobs [related to <keyword>]` or `list jenkins jobs [containing <keyword>]`
-  - `/jenkins list views` or `list jenkins views`
-  - `/jenkins check job <job_name>` or `check jenkins job <job_name>`
-  - `/jenkins trigger job <job_name> [with params param1=value1,param2=value2]` or `trigger jenkins job <job_name> [with params param1=value1,param2=value2]`
-- ReportPortal Commands (if configured):
-    - `/rp list launches [attribute_key=attribute_value]`
-- Jira Commands (if configured):
-    - `/jira query <natural_language_query>` (e.g., `/jira query globalhub bugs to be fixed in current release`)
-    - `/jira whoami`: Get information about the current Jira user.
-- General Chat: Any other query will be handled by the selected LLM (Models.corp or Ollama)."""
+                    resp = read_prompt_file("help_message.txt")
                     jenkins_handled = True # Mark as handled to skip LLM
                     print(f"DEBUG: Help command handled. {jenkins_handled=}")
 
@@ -451,16 +220,7 @@ if prompt := st.chat_input("What is up?"):
                                 date_jql = "AND updated >= startOfMonth() AND updated <= endOfMonth()"
                                 clean_jira_prompt = clean_jira_prompt.lower().replace("this month", "").strip()
 
-                            llm_jira_prompt = f"""You are an expert in Jira JQL. Based on the following user request, generate ONLY the JQL query string. It is very important to preserve the exact names for components and versions as provided in the user request. DO NOT include the 'project', 'component', or any date-related clauses (like 'created', 'updated', or 'duedate') in the JQL, as these will be handled separately by the application. DO NOT include any other text or markdown, just the JQL string.
-
-User Request: {clean_jira_prompt}
-
-Example JQL output for 'all bugs in the "Web UI" component for the "v2.1" release':
-issuetype = Bug AND fixVersion = "v2.1"
-
-Example JQL output for 'my open tasks':
-assignee = currentUser() AND status in ("To Do", "In Progress") AND issuetype = Task
-"""
+                            llm_jira_prompt = read_prompt_file("jira_query_prompt.txt").format(clean_jira_prompt=clean_jira_prompt)
 
                             try:
                                 print(f"DEBUG: LLM Jira prompt being sent: {llm_jira_prompt}")

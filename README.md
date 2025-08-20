@@ -29,8 +29,8 @@ Follow these steps to get the Echo Chatbot running on your local machine.
 ### 1. Clone the Repository
 
 ```bash
-git clone https://github.com/your-repo/echo-chatbot.git
-cd echo-chatbot
+git clone https://github.com/hchenxa/agent-sample.git
+cd agent-sample
 ```
 
 ### 2. Install Dependencies

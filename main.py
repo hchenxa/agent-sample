@@ -11,8 +11,7 @@ import subprocess
 import socket
 from utils.config_manager import setup_configurations
 from utils.chat_history_manager import new_chat, get_active_chat, save_chat_session, render_chat_history_sidebar
-from utils.config_manager import setup_configurations
-from utils.chat_history_manager import new_chat, get_active_chat, save_chat_session, render_chat_history_sidebar
+from utils.rp_analytics import ReportPortalAnalytics
 
 dotenv.load_dotenv()
 
@@ -46,6 +45,36 @@ if "jira_component_rules_content" not in st.session_state:
     st.session_state.jira_component_rules_content = ""
 
 render_chat_history_sidebar()
+
+# File Upload Section in Sidebar
+with st.sidebar.expander("Upload File", expanded=False):
+    uploaded_file = st.file_uploader("Choose a file", type=["txt", "csv", "json", "log", "md", "py", "xml", "html", "css", "js", "ts", "tsx", "java", "c", "cpp", "h", "hpp", "go", "rs", "toml", "yaml", "yml", "ini", "cfg", "conf", "sh", "bash", "Dockerfile", "sql", "jsonl", "tsv", "parquet", "feather", "avro", "orc", "xlsx", "xls", "odt", "ods", "odp", "doc", "docx", "ppt", "pptx", "pdf", "png", "jpg", "jpeg", "gif", "bmp", "svg", "webp"]) # Broad range of types
+    if uploaded_file is not None:
+        file_details = {"filename": uploaded_file.name, "filetype": uploaded_file.type, "filesize": uploaded_file.size}
+        st.write(file_details)
+
+        # Read file content based on type
+        if uploaded_file.type and ("text" in uploaded_file.type or uploaded_file.type in [
+            "application/json", "application/xml", "application/x-sh", "application/x-yaml",
+            "text/markdown", "text/csv", "text/plain", "text/html", "text/css", "text/javascript",
+            "application/x-python", "text/x-java-source", "text/x-c", "text/x-c++", "text/x-go", "text/x-rust",
+            "application/toml", "application/x-ini", "application/x-config", "application/x-sql",
+            "application/jsonl", "text/tab-separated-values"
+        ]):
+            string_data = uploaded_file.read().decode("utf-8")
+            st.session_state['uploaded_file_content'] = string_data
+            st.session_state['uploaded_file_name'] = uploaded_file.name
+            st.success(f"File '{uploaded_file.name}' uploaded and content stored.")
+            with st.expander("View File Content", expanded=False):
+                st.code(string_data, language=uploaded_file.name.split('.')[-1])
+        elif uploaded_file.type and ("image" in uploaded_file.type or uploaded_file.type == "application/pdf"):
+            st.warning(f"File '{uploaded_file.name}' is a binary file ({uploaded_file.type}). Content cannot be displayed directly as text.")
+            st.session_state['uploaded_file_content'] = uploaded_file.getvalue() # Store binary content
+            st.session_state['uploaded_file_name'] = uploaded_file.name
+        else:
+            st.warning(f"Unsupported file type: {uploaded_file.type}. Content not stored for LLM analysis.")
+            st.session_state['uploaded_file_content'] = None
+            st.session_state['uploaded_file_name'] = None
 
 # --- Main App Layout ---
 st.title("Echo Chatbot")
@@ -315,6 +344,172 @@ if prompt := st.chat_input("What is up?"):
                     launches_for_charting_and_analysis = st.session_state['rp_launches_data']
                     df = pd.DataFrame(launches_for_charting_and_analysis)
 
+                    # Gather detailed test data for enhanced analytics
+                    test_items_data = {}
+                    all_failed_test_names = []
+                    all_skipped_test_names = []
+                    all_failed_issue_types = []
+
+                    # Define filters for failed and skipped test items
+                    failed_item_filter = "filter.eq.hasStats=true&filter.eq.hasChildren=false&filter.in.type=STEP&filter.in.status=FAILED"
+                    skipped_item_filter = "filter.eq.hasStats=true&filter.eq.hasChildren=false&filter.in.type=STEP&filter.in.status=SKIPPED"
+                    all_items_filter = "filter.eq.hasStats=true&filter.eq.hasChildren=false&filter.in.type=STEP"
+
+                    for launch in launches_for_charting_and_analysis:
+                        launch_id = launch.get('id')
+                        failed_count = launch.get('failed', 0)
+                        skipped_count = launch.get('skipped', 0)
+                        
+                        if launch_id:
+                            # Get all test items for this launch for analytics
+                            all_test_items = rp_manager.get_test_items_for_launch(launch_id, item_filter=all_items_filter)
+                            if isinstance(all_test_items, list):
+                                test_items_data[launch_id] = all_test_items
+                            
+                            # Get failed tests
+                            if failed_count > 0:
+                                test_items = rp_manager.get_test_items_for_launch(launch_id, item_filter=failed_item_filter)
+                                if isinstance(test_items, list):
+                                    for item in test_items:
+                                        all_failed_test_names.append(item.get('name', 'Unknown Test'))
+                                        all_failed_issue_types.append(item.get('issue_type', 'Unknown Issue Type'))
+
+                            # Get skipped tests  
+                            if skipped_count > 0:
+                                test_items = rp_manager.get_test_items_for_launch(launch_id, item_filter=skipped_item_filter)
+                                if isinstance(test_items, list):
+                                    for item in test_items:
+                                        all_skipped_test_names.append(item.get('name', 'Unknown Test'))
+
+                    # Initialize enhanced analytics
+                    analytics = ReportPortalAnalytics(launches_for_charting_and_analysis, test_items_data)
+                    
+                    # Generate executive summary
+                    exec_summary = analytics.generate_executive_summary()
+                    exec_metrics = analytics.calculate_test_execution_metrics()
+                    flaky_tests = analytics.detect_flaky_tests()
+                    failure_analysis = analytics.analyze_failure_patterns()
+                    duration_analytics = analytics.calculate_test_duration_analytics()
+                    historical_comparison = analytics.generate_historical_comparison()
+
+                    # Display Executive Summary Dashboard
+                    st.subheader("📊 Executive Summary")
+                    col1, col2, col3, col4 = st.columns(4)
+                    
+                    with col1:
+                        st.metric("Total Launches", exec_summary['overview']['total_launches'])
+                        st.metric("Quality Score", f"{exec_summary['overview']['quality_score']}/100")
+                    
+                    with col2:
+                        st.metric("Total Tests", exec_summary['overview']['total_tests'])
+                        st.metric("Overall Pass Rate", f"{exec_summary['overview']['overall_pass_rate']:.1f}%")
+                    
+                    with col3:
+                        st.metric("Flaky Tests", exec_summary['test_stability']['flaky_tests_detected'])
+                        if duration_analytics.get('avg_test_duration'):
+                            st.metric("Avg Test Duration", f"{duration_analytics['avg_test_duration']:.1f}s")
+                    
+                    with col4:
+                        st.metric("Failure Patterns", exec_summary['failure_insights']['unique_failure_patterns'])
+                        if historical_comparison.get('avg_pass_rate_change'):
+                            change = historical_comparison['avg_pass_rate_change']
+                            st.metric("Pass Rate Trend", f"{change:+.1f}%")
+
+                    # Test Execution Metrics
+                    st.subheader("📈 Test Execution Metrics")
+                    
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        st.write("**Test Volume:**")
+                        st.write(f"- Average tests per launch: {exec_metrics.get('avg_tests_per_launch', 0):.1f}")
+                        st.write(f"- Median tests per launch: {exec_metrics.get('median_tests_per_launch', 0):.1f}")
+                        st.write(f"- Total passed: {exec_metrics.get('total_passed', 0):,}")
+                        st.write(f"- Total failed: {exec_metrics.get('total_failed', 0):,}")
+                        st.write(f"- Total skipped: {exec_metrics.get('total_skipped', 0):,}")
+                    
+                    with col2:
+                        st.write("**Quality Metrics:**")
+                        st.write(f"- Average pass rate: {exec_metrics.get('avg_pass_rate', 0):.1f}%")
+                        st.write(f"- Pass rate stability (σ): {exec_metrics.get('pass_rate_std', 0):.1f}%")
+                        trend = exec_metrics.get('test_execution_trend', 0)
+                        trend_direction = "📈 Increasing" if trend > 0 else "📉 Decreasing" if trend < 0 else "➡️ Stable"
+                        st.write(f"- Test volume trend: {trend_direction}")
+
+                    # Test Stability Analysis
+                    if flaky_tests:
+                        st.subheader("⚠️ Test Stability Analysis")
+                        st.write("**Top Flaky Tests:**")
+                        for i, test in enumerate(flaky_tests[:5], 1):
+                            with st.expander(f"{i}. {test['test_name']} (Flaky Score: {test['flaky_score']:.1f}%)"):
+                                st.write(f"- **Total runs:** {test['total_runs']}")
+                                st.write(f"- **Passed:** {test['passed']} times")
+                                st.write(f"- **Failed:** {test['failed']} times")
+                                st.write(f"- **Skipped:** {test['skipped']} times")
+                                st.write("- **Status distribution:**", test['status_distribution'])
+
+                    # Enhanced Failure Analysis
+                    if failure_analysis.get('failure_categories'):
+                        st.subheader("🔍 Failure Pattern Analysis")
+                        
+                        col1, col2 = st.columns(2)
+                        with col1:
+                            st.write("**Failure Categories:**")
+                            for category, count in failure_analysis['failure_categories'].items():
+                                if count > 0:
+                                    st.write(f"- {category}: {count}")
+                        
+                        with col2:
+                            st.write("**Top Failure Patterns:**")
+                            for pattern, count in failure_analysis.get('top_failure_patterns', [])[:5]:
+                                st.write(f"- {pattern}: {count} occurrences")
+
+                        # Critical Issues Alert
+                        critical_issues = exec_summary['failure_insights'].get('critical_issues', [])
+                        if critical_issues:
+                            st.error("**🚨 Critical Issues Detected:**")
+                            for issue in critical_issues:
+                                st.write(f"- {issue}")
+
+                    # Performance Analytics
+                    if duration_analytics:
+                        st.subheader("⏱️ Performance Analytics")
+                        
+                        col1, col2 = st.columns(2)
+                        with col1:
+                            st.write("**Duration Statistics:**")
+                            st.write(f"- Average: {duration_analytics.get('avg_test_duration', 0):.1f}s")
+                            st.write(f"- Median: {duration_analytics.get('median_test_duration', 0):.1f}s")
+                            st.write(f"- Min: {duration_analytics.get('min_test_duration', 0):.1f}s")
+                            st.write(f"- Max: {duration_analytics.get('max_test_duration', 0):.1f}s")
+                        
+                        with col2:
+                            slowest_tests = duration_analytics.get('slowest_tests', [])
+                            if slowest_tests:
+                                st.write("**Slowest Tests:**")
+                                for test in slowest_tests[:5]:
+                                    st.write(f"- {test['test_name']}: {test['avg_duration']:.1f}s")
+
+                    # Historical Comparison
+                    if historical_comparison:
+                        st.subheader("📊 Historical Trends (Last 30 Days)")
+                        
+                        col1, col2, col3 = st.columns(3)
+                        with col1:
+                            if 'avg_pass_rate_change' in historical_comparison:
+                                change = historical_comparison['avg_pass_rate_change']
+                                delta_color = "normal" if abs(change) < 5 else ("inverse" if change < 0 else "normal")
+                                st.metric("Pass Rate Change", f"{change:+.1f}%", delta_color=delta_color)
+                        
+                        with col2:
+                            if 'avg_tests_per_launch_change' in historical_comparison:
+                                change = historical_comparison['avg_tests_per_launch_change']
+                                st.metric("Test Volume Change", f"{change:+.1f}%")
+                        
+                        with col3:
+                            if 'total_tests_change' in historical_comparison:
+                                change = historical_comparison['total_tests_change']
+                                st.metric("Total Tests Change", f"{change:+.1f}%")
+
                     # Pass Rate Trend Chart
                     pass_rate_chart_path = os.path.join(slidev_output_dir, "pass_rate_trend.png")
                     st.subheader("Pass Rate Trend")
@@ -364,43 +559,10 @@ if prompt := st.chat_input("What is up?"):
                     else:
                         print(f"DEBUG: OCP Coverage Chart file DOES NOT exist at {ocp_coverage_chart_path}")
 
-                    # Analyze and display most frequent failure cases
+                    # Legacy Failure and Skipped Analysis (now included in enhanced analytics above)
                     st.subheader("Most Frequent Failure Cases")
-                    all_failed_test_names = []
-                    all_skipped_test_names = [] # New list for skipped tests
-                    all_failed_issue_types = [] # Keep for potential future use or existing LLM analysis
-
-                    # Define filters for failed and skipped test items separately
-                    failed_item_filter = "filter.eq.hasStats=true&filter.eq.hasChildren=false&filter.in.type=STEP&filter.in.status=FAILED"
-                    skipped_item_filter = "filter.eq.hasStats=true&filter.eq.hasChildren=false&filter.in.type=STEP&filter.in.status=SKIPPED"
-
-                    for launch in launches_for_charting_and_analysis:
-                        launch_id = launch.get('id')
-                        failed_count = launch.get('failed', 0)
-                        skipped_count = launch.get('skipped', 0)
-                        
-                        if launch_id and failed_count > 0:
-                            test_items = rp_manager.get_test_items_for_launch(launch_id, item_filter=failed_item_filter)
-                            if isinstance(test_items, list):
-                                for item in test_items:
-                                    all_failed_test_names.append(item.get('name', 'Unknown Test'))
-                                    all_failed_issue_types.append(item.get('issue_type', 'Unknown Issue Type'))
-                            else:
-                                st.warning(f"Could not retrieve failed test items for launch {launch_id}: {test_items}")
-
-                        if launch_id and skipped_count > 0:
-                            test_items = rp_manager.get_test_items_for_launch(launch_id, item_filter=skipped_item_filter)
-                            if isinstance(test_items, list):
-                                for item in test_items:
-                                    all_skipped_test_names.append(item.get('name', 'Unknown Test'))
-                            else:
-                                st.warning(f"Could not retrieve skipped test items for launch {launch_id}: {test_items}")
-                    
-                    
-                    
-
                     if all_failed_test_names:
-                        top_failed_tests = Counter(all_failed_test_names).most_common(5) # Top 5 failing tests
+                        top_failed_tests = Counter(all_failed_test_names).most_common(5)
                         st.markdown("**Top 5 Failing Tests:**")
                         for test_name, count in top_failed_tests:
                             st.markdown(f"- {test_name} (Failed {count} times)")
@@ -410,38 +572,89 @@ if prompt := st.chat_input("What is up?"):
                     # Display most frequent skipped cases
                     st.subheader("Most Frequent Skipped Cases")
                     if all_skipped_test_names:
-                        top_skipped_tests = Counter(all_skipped_test_names).most_common(5) # Top 5 skipped tests
+                        top_skipped_tests = Counter(all_skipped_test_names).most_common(5)
                         st.markdown("**Top 5 Skipped Tests:**")
                         for test_name, count in top_skipped_tests:
                             st.markdown(f"- {test_name} (Skipped {count} times)")
                     else:
                         st.markdown("No skipped tests found in the selected launches.")
 
-                    # LLM Analysis
+                    # Enhanced LLM Analysis with new metrics
                     if provider == "Models.corp" and client and not skip_llm_analysis:
-                        analysis_prompt = f"The user asked: '{prompt}'. Here is a list of ReportPortal launches:\n\n"
-                        for launch in launches_for_charting_and_analysis:
-                            analysis_prompt += f"- Name: {launch['name']}, Pass Rate: {launch['passed']}/{launch['total']} ({launch['pass_rate']}), URL: {launch['url']}\n"
+                        analysis_prompt = f"The user asked: '{prompt}'. Here is comprehensive ReportPortal analysis data:\n\n"
                         
-                        if all_failed_test_names:
-                            analysis_prompt += "\nMost Frequent Failing Tests:\n"
-                            for test_name, count in Counter(all_failed_test_names).most_common(5):
-                                analysis_prompt += f"- {test_name} (Failed {count} times)\n"
-
-                        if all_skipped_test_names:
-                            analysis_prompt += "\nMost Frequent Skipped Tests:\n"
-                            for test_name, count in Counter(all_skipped_test_names).most_common(5):
-                                analysis_prompt += f"- {test_name} (Skipped {count} times)\n"
-
-                        analysis_prompt += "\nBased on this data and the user's original request, please provide a comprehensive analysis. Focus on aspects like pass rates, test coverage across platforms, and identifying unstable tests."
+                        # Executive Summary
+                        analysis_prompt += f"## Executive Summary:\n"
+                        analysis_prompt += f"- Total Launches: {exec_summary['overview']['total_launches']}\n"
+                        analysis_prompt += f"- Total Tests: {exec_summary['overview']['total_tests']:,}\n"
+                        analysis_prompt += f"- Overall Pass Rate: {exec_summary['overview']['overall_pass_rate']:.1f}%\n"
+                        analysis_prompt += f"- Quality Score: {exec_summary['overview']['quality_score']}/100\n"
+                        analysis_prompt += f"- Flaky Tests Detected: {exec_summary['test_stability']['flaky_tests_detected']}\n"
+                        analysis_prompt += f"- Unique Failure Patterns: {exec_summary['failure_insights']['unique_failure_patterns']}\n\n"
+                        
+                        # Test Execution Metrics
+                        analysis_prompt += f"## Test Execution Metrics:\n"
+                        analysis_prompt += f"- Average tests per launch: {exec_metrics.get('avg_tests_per_launch', 0):.1f}\n"
+                        analysis_prompt += f"- Pass rate stability (std dev): {exec_metrics.get('pass_rate_std', 0):.1f}%\n"
+                        trend = exec_metrics.get('test_execution_trend', 0)
+                        trend_text = "increasing" if trend > 0 else "decreasing" if trend < 0 else "stable"
+                        analysis_prompt += f"- Test volume trend: {trend_text}\n\n"
+                        
+                        # Flaky Tests
+                        if flaky_tests:
+                            analysis_prompt += f"## Top Flaky Tests:\n"
+                            for test in flaky_tests[:3]:
+                                analysis_prompt += f"- {test['test_name']}: {test['flaky_score']:.1f}% flaky score ({test['passed']}/{test['total_runs']} pass rate)\n"
+                            analysis_prompt += "\n"
+                        
+                        # Failure Analysis
+                        if failure_analysis.get('failure_categories'):
+                            analysis_prompt += f"## Failure Categories:\n"
+                            for category, count in failure_analysis['failure_categories'].items():
+                                if count > 0:
+                                    analysis_prompt += f"- {category}: {count} failures\n"
+                            analysis_prompt += "\n"
+                            
+                            # Critical Issues
+                            critical_issues = exec_summary['failure_insights'].get('critical_issues', [])
+                            if critical_issues:
+                                analysis_prompt += f"## Critical Issues:\n"
+                                for issue in critical_issues:
+                                    analysis_prompt += f"- {issue}\n"
+                                analysis_prompt += "\n"
+                        
+                        # Historical Trends
+                        if historical_comparison:
+                            analysis_prompt += f"## Historical Trends (Last 30 Days):\n"
+                            for metric, value in historical_comparison.items():
+                                if metric.endswith('_change'):
+                                    metric_name = metric.replace('_change', '').replace('_', ' ').title()
+                                    analysis_prompt += f"- {metric_name}: {value:+.1f}% change\n"
+                            analysis_prompt += "\n"
+                        
+                        # Performance Data
+                        if duration_analytics:
+                            analysis_prompt += f"## Performance Metrics:\n"
+                            analysis_prompt += f"- Average test duration: {duration_analytics.get('avg_test_duration', 0):.1f}s\n"
+                            analysis_prompt += f"- Median test duration: {duration_analytics.get('median_test_duration', 0):.1f}s\n"
+                            slowest_tests = duration_analytics.get('slowest_tests', [])
+                            if slowest_tests:
+                                analysis_prompt += f"- Slowest test: {slowest_tests[0]['test_name']} ({slowest_tests[0]['avg_duration']:.1f}s)\n"
+                            analysis_prompt += "\n"
+                        
+                        # Traditional data for compatibility
+                        for launch in launches_for_charting_and_analysis:
+                            analysis_prompt += f"- Launch: {launch['name']}, Pass Rate: {launch['passed']}/{launch['total']} ({launch['pass_rate']})\n"
+                        
+                        analysis_prompt += "\nBased on this comprehensive analysis, please provide insights on test quality, stability, performance, and recommendations for improvement. Focus on identifying trends, root causes, and actionable next steps."
                         
                         try:
                             llm_analysis_resp = client.chat(messages=[{"role": "user", "content": analysis_prompt}])
-                            st.markdown("\n\n### LLM Analysis:\n" + llm_analysis_resp)
-                            active_chat["messages"].append({"role": "assistant", "content": "\n\n### LLM Analysis:\n" + llm_analysis_resp}) # Add to chat history
+                            st.markdown("\n\n### 🤖 AI-Powered Analysis:\n" + llm_analysis_resp)
+                            active_chat["messages"].append({"role": "assistant", "content": "\n\n### 🤖 AI-Powered Analysis:\n" + llm_analysis_resp})
                         except Exception as e:
                             st.markdown(f"\n\nError during LLM analysis: {e}")
-                            active_chat["messages"].append({"role": "assistant", "content": f"\n\nError during LLM analysis: {e}"}) # Add error to chat history
+                            active_chat["messages"].append({"role": "assistant", "content": f"\n\nError during LLM analysis: {e}"})
 
 
                 # --- Slidev Presentation Generation ---
@@ -449,43 +662,161 @@ if prompt := st.chat_input("What is up?"):
                         slidev_output_dir = os.path.join(os.getcwd(), "slidev_presentations")
                         os.makedirs(slidev_output_dir, exist_ok=True)
 
-                        # Generate Slidev Markdown content
-                        slidev_content = "# ReportPortal Analysis\n\n"
+                        # Generate Enhanced Slidev Markdown content
+                        slidev_content = "---\ntheme: default\nclass: text-center\nhighlighter: shiki\nlineNumbers: false\ninfo: |\n  ## ReportPortal Enhanced Analysis\n  Comprehensive test quality and performance insights\ndrawings:\n  persist: false\ntransition: slide-left\ntitle: ReportPortal Analysis\n---\n\n"
+                        slidev_content += "# 📊 ReportPortal Enhanced Analysis\n\n"
+                        slidev_content += "Comprehensive Test Quality & Performance Report\n\n"
+                        slidev_content += f"Generated: {pd.Timestamp.now().strftime('%Y-%m-%d %H:%M')}\n\n"
+                        
+                        # Executive Summary Slide
                         slidev_content += "---\n\n"
-                        slidev_content += "## ReportPortal Launches\n\n"
-                        if launches_for_charting_and_analysis:
-                            slidev_content += "| Launch Name | Pass Rate | URL |\n"
-                            slidev_content += "|---|---|---|\n"
-                            for launch in launches_for_charting_and_analysis:
-                                slidev_content += f"| {launch['name']} | {launch['pass_rate']} | [Link]({launch['url']}) |\n"
-                        else:
-                            slidev_content += "No launches found in ReportPortal with the given filter.\n"
+                        slidev_content += "# 📈 Executive Summary\n\n"
+                        slidev_content += "<div class=\"grid grid-cols-2 gap-10 pt-4 -mb-6\">\n\n"
+                        slidev_content += "<div>\n\n"
+                        slidev_content += "## Key Metrics\n\n"
+                        slidev_content += f"- **Total Launches**: {exec_summary['overview']['total_launches']}\n"
+                        slidev_content += f"- **Total Tests**: {exec_summary['overview']['total_tests']:,}\n"
+                        slidev_content += f"- **Overall Pass Rate**: {exec_summary['overview']['overall_pass_rate']:.1f}%\n"
+                        slidev_content += f"- **Quality Score**: {exec_summary['overview']['quality_score']}/100\n\n"
+                        slidev_content += "</div>\n\n"
+                        slidev_content += "<div>\n\n"
+                        slidev_content += "## Quality Indicators\n\n"
+                        slidev_content += f"- **Flaky Tests**: {exec_summary['test_stability']['flaky_tests_detected']}\n"
+                        slidev_content += f"- **Failure Patterns**: {exec_summary['failure_insights']['unique_failure_patterns']}\n"
+                        slidev_content += f"- **Pass Rate Stability**: {exec_metrics.get('pass_rate_std', 0):.1f}% σ\n"
+                        if historical_comparison.get('avg_pass_rate_change'):
+                            change = historical_comparison['avg_pass_rate_change']
+                            trend_emoji = "📈" if change > 0 else "📉" if change < 0 else "➡️"
+                            slidev_content += f"- **30-Day Trend**: {trend_emoji} {change:+.1f}%\n"
+                        slidev_content += "\n</div>\n\n"
+                        slidev_content += "</div>\n\n"
 
+                        # Test Execution Metrics
                         slidev_content += "---\n\n"
-                        slidev_content += "## Pass Rate Trend\n\n"
+                        slidev_content += "# 📊 Test Execution Metrics\n\n"
+                        slidev_content += "<div class=\"grid grid-cols-2 gap-10 pt-4 -mb-6\">\n\n"
+                        slidev_content += "<div>\n\n"
+                        slidev_content += "## Volume Metrics\n\n"
+                        slidev_content += f"- **Avg Tests/Launch**: {exec_metrics.get('avg_tests_per_launch', 0):.1f}\n"
+                        slidev_content += f"- **Median Tests/Launch**: {exec_metrics.get('median_tests_per_launch', 0):.1f}\n"
+                        slidev_content += f"- **Total Passed**: {exec_metrics.get('total_passed', 0):,}\n"
+                        slidev_content += f"- **Total Failed**: {exec_metrics.get('total_failed', 0):,}\n"
+                        slidev_content += f"- **Total Skipped**: {exec_metrics.get('total_skipped', 0):,}\n\n"
+                        slidev_content += "</div>\n\n"
+                        slidev_content += "<div>\n\n"
+                        slidev_content += "## Quality Metrics\n\n"
+                        slidev_content += f"- **Average Pass Rate**: {exec_metrics.get('avg_pass_rate', 0):.1f}%\n"
+                        trend = exec_metrics.get('test_execution_trend', 0)
+                        trend_direction = "📈 Increasing" if trend > 0 else "📉 Decreasing" if trend < 0 else "➡️ Stable"
+                        slidev_content += f"- **Volume Trend**: {trend_direction}\n"
+                        if duration_analytics:
+                            slidev_content += f"- **Avg Duration**: {duration_analytics.get('avg_test_duration', 0):.1f}s\n"
+                            slidev_content += f"- **Median Duration**: {duration_analytics.get('median_test_duration', 0):.1f}s\n"
+                        slidev_content += "\n</div>\n\n"
+                        slidev_content += "</div>\n\n"
+
+                        # Flaky Tests Analysis
+                        if flaky_tests:
+                            slidev_content += "---\n\n"
+                            slidev_content += "# ⚠️ Test Stability Analysis\n\n"
+                            slidev_content += "## Top Flaky Tests\n\n"
+                            for i, test in enumerate(flaky_tests[:5], 1):
+                                slidev_content += f"### {i}. {test['test_name']}\n"
+                                slidev_content += f"- **Flaky Score**: {test['flaky_score']:.1f}%\n"
+                                slidev_content += f"- **Total Runs**: {test['total_runs']}\n"
+                                slidev_content += f"- **Pass Rate**: {test['passed']}/{test['total_runs']} ({(test['passed']/test['total_runs']*100):.1f}%)\n\n"
+
+                        # Failure Analysis
+                        if failure_analysis.get('failure_categories'):
+                            slidev_content += "---\n\n"
+                            slidev_content += "# 🔍 Failure Pattern Analysis\n\n"
+                            slidev_content += "<div class=\"grid grid-cols-2 gap-10 pt-4 -mb-6\">\n\n"
+                            slidev_content += "<div>\n\n"
+                            slidev_content += "## Failure Categories\n\n"
+                            for category, count in failure_analysis['failure_categories'].items():
+                                if count > 0:
+                                    slidev_content += f"- **{category}**: {count}\n"
+                            slidev_content += "\n</div>\n\n"
+                            slidev_content += "<div>\n\n"
+                            slidev_content += "## Top Patterns\n\n"
+                            for pattern, count in failure_analysis.get('top_failure_patterns', [])[:5]:
+                                slidev_content += f"- **{pattern}**: {count}x\n"
+                            slidev_content += "\n</div>\n\n"
+                            slidev_content += "</div>\n\n"
+                            
+                            # Critical Issues
+                            critical_issues = exec_summary['failure_insights'].get('critical_issues', [])
+                            if critical_issues:
+                                slidev_content += "## 🚨 Critical Issues\n\n"
+                                for issue in critical_issues:
+                                    slidev_content += f"- {issue}\n"
+                                slidev_content += "\n"
+
+                        # Performance Analytics
+                        if duration_analytics and duration_analytics.get('slowest_tests'):
+                            slidev_content += "---\n\n"
+                            slidev_content += "# ⏱️ Performance Analytics\n\n"
+                            slidev_content += "<div class=\"grid grid-cols-2 gap-10 pt-4 -mb-6\">\n\n"
+                            slidev_content += "<div>\n\n"
+                            slidev_content += "## Duration Statistics\n\n"
+                            slidev_content += f"- **Average**: {duration_analytics.get('avg_test_duration', 0):.1f}s\n"
+                            slidev_content += f"- **Median**: {duration_analytics.get('median_test_duration', 0):.1f}s\n"
+                            slidev_content += f"- **Min**: {duration_analytics.get('min_test_duration', 0):.1f}s\n"
+                            slidev_content += f"- **Max**: {duration_analytics.get('max_test_duration', 0):.1f}s\n\n"
+                            slidev_content += "</div>\n\n"
+                            slidev_content += "<div>\n\n"
+                            slidev_content += "## Slowest Tests\n\n"
+                            for test in duration_analytics['slowest_tests'][:5]:
+                                slidev_content += f"- **{test['test_name']}**: {test['avg_duration']:.1f}s\n"
+                            slidev_content += "\n</div>\n\n"
+                            slidev_content += "</div>\n\n"
+
+                        # Historical Trends
+                        if historical_comparison:
+                            slidev_content += "---\n\n"
+                            slidev_content += "# 📈 Historical Trends (30 Days)\n\n"
+                            slidev_content += "## Performance Changes\n\n"
+                            for metric, value in historical_comparison.items():
+                                if metric.endswith('_change'):
+                                    metric_name = metric.replace('_change', '').replace('_', ' ').title()
+                                    trend_emoji = "📈" if value > 0 else "📉" if value < 0 else "➡️"
+                                    slidev_content += f"- **{metric_name}**: {trend_emoji} {value:+.1f}%\n"
+                            slidev_content += "\n"
+
+                        # Traditional charts
+                        slidev_content += "---\n\n"
+                        slidev_content += "# 📈 Pass Rate Trend\n\n"
                         slidev_content += f"![Pass Rate Trend](/pass_rate_trend.png)\n\n"
 
                         slidev_content += "---\n\n"
-                        slidev_content += "## OCP Platform Test Coverage\n\n"
+                        slidev_content += "# 🏗️ Platform Test Coverage\n\n"
                         slidev_content += f"![OCP Platform Test Coverage](/ocp_coverage.png)\n\n"
 
+                        # Launch Details
                         slidev_content += "---\n\n"
-                        slidev_content += "## Most Frequent Failure Cases\n\n"
-                        if all_failed_test_names:
-                            top_failed_tests = Counter(all_failed_test_names).most_common(5)
-                            for test_name, count in top_failed_tests:
-                                slidev_content += f"- {test_name} (Failed {count} times)\n"
+                        slidev_content += "# 🚀 Launch Details\n\n"
+                        if launches_for_charting_and_analysis:
+                            slidev_content += "| Launch Name | Pass Rate | Total Tests |\n"
+                            slidev_content += "|---|---|---|\n"
+                            for launch in launches_for_charting_and_analysis:
+                                slidev_content += f"| {launch['name']} | {launch['pass_rate']} | {launch['total']} |\n"
                         else:
-                            slidev_content += "No failed tests found in the selected launches.\n"
+                            slidev_content += "No launches found in ReportPortal with the given filter.\n"
 
-                        slidev_content += "---\n\n"
-                        slidev_content += "## Most Frequent Skipped Cases\n\n"
+                        # Traditional failure analysis (simplified for slides)
+                        if all_failed_test_names:
+                            slidev_content += "---\n\n"
+                            slidev_content += "# ❌ Top Failing Tests\n\n"
+                            top_failed_tests = Counter(all_failed_test_names).most_common(5)
+                            for i, (test_name, count) in enumerate(top_failed_tests, 1):
+                                slidev_content += f"{i}. **{test_name}** - {count} failures\n"
+
                         if all_skipped_test_names:
+                            slidev_content += "---\n\n"
+                            slidev_content += "# ⏭️ Most Skipped Tests\n\n"
                             top_skipped_tests = Counter(all_skipped_test_names).most_common(5)
-                            for test_name, count in top_skipped_tests:
-                                slidev_content += f"- {test_name} (Skipped {count} times)\n"
-                        else:
-                            slidev_content += "No skipped tests found in the selected launches.\n"
+                            for i, (test_name, count) in enumerate(top_skipped_tests, 1):
+                                slidev_content += f"{i}. **{test_name}** - {count} skips\n"
 
                         if 'llm_analysis_resp' in locals():
                             slidev_content += "---\n\n"
@@ -664,13 +995,50 @@ if prompt := st.chat_input("What is up?"):
                         jenkins_handled = True # Ensure it's handled by Jenkins logic, even if unrecognized
                         print(f"DEBUG: Jenkins explicit command not understood. resp: {resp}")
 
+                # Prepare messages for LLM, including uploaded file content if available.
+                messages_for_llm = active_chat["messages"]
+                if 'uploaded_file_content' in st.session_state and st.session_state['uploaded_file_content'] is not None:
+                    file_name = st.session_state.get('uploaded_file_name', 'uploaded_file')
+                    file_content = st.session_state['uploaded_file_content']
+                    
+                    # Prepend file content to the user's prompt for LLM context.
+                    # For text files, include content directly. For binary, just mention it.
+                    if isinstance(file_content, str): # Assuming text content
+                        file_message = f"The user has provided a file named '{file_name}' with the following content:\n\n```\n{file_content}\n```\n\n"
+                    else: # Binary content (image, pdf, etc.)
+                        # We don't have uploaded_file.type directly here, so we'll use a generic message.
+                        file_message = f"The user has provided a file named '{file_name}'. "\
+                                       f"Its content is not directly readable as text, but it is available for context if needed.\n\n"
+                    
+                    # Add the file content as a system message or prepend to the user's last message.
+                    # For simplicity, let's prepend to the current user prompt for LLM processing.
+                    # A more sophisticated approach might involve a separate message role or tool for file content.
+                    # For now, we'll modify the last user message or add a new one if the last is not user.
+                    
+                    # Find the last user message to prepend the file content
+                    last_message_index = -1
+                    for i, msg in enumerate(messages_for_llm):
+                        if msg["role"] == "user":
+                            last_message_index = i
+                    
+                    if last_message_index != -1:
+                        messages_for_llm[last_message_index]["content"] = file_message + messages_for_llm[last_message_index]["content"]
+                    else:
+                        # If for some reason there's no user message yet (e.g., first interaction after upload),
+                        # add it as a new user message before the current prompt.
+                        messages_for_llm.append({"role": "user", "content": file_message})
+                    
+                    # Clear the uploaded file content from session state after it's been processed by the LLM
+                    st.session_state['uploaded_file_content'] = None
+                    st.session_state['uploaded_file_name'] = None
+
                 if not jenkins_handled and not rp_handled and not jira_command_handled_successfully:
                     try:
                         if client:
                             if provider == "ollama":
-                                resp = client.chat(model=ollama_model, messages=active_chat["messages"])
+                                resp = client.chat(model=ollama_model, messages=messages_for_llm)
                             else:  # For Models.corp
-                                resp = client.chat(active_chat["messages"])
+                                resp = client.chat(messages_for_llm)
                         else:
                             resp = "Chat client is not configured. Please check your settings in the sidebar."
                     except Exception as e:

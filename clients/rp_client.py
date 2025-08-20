@@ -139,7 +139,14 @@ class ReportPortalManager:
                             'name': item.get('name'),
                             'status': item.get('status'),
                             'type': item.get('type'),
-                            'issue_type': item.get('issue', {}).get('issueType', 'N/A')
+                            'issue_type': item.get('issue', {}).get('issueType', 'N/A'),
+                            'startTime': item.get('startTime'),
+                            'endTime': item.get('endTime'),
+                            'duration': self._calculate_duration(item.get('startTime'), item.get('endTime')),
+                            'description': item.get('description', ''),
+                            'tags': item.get('tags', []),
+                            'statistics': item.get('statistics', {}),
+                            'parameters': item.get('parameters', [])
                         })
                     return formatted_test_items
                 else:
@@ -149,3 +156,100 @@ class ReportPortalManager:
             except Exception as e:
                 return f"Error processing ReportPortal test items: {e}"
         return "ReportPortal configuration incomplete (endpoint, UUID, project, or launch_id missing)."
+
+    def get_launch_details(self, launch_id):
+        """
+        Retrieves detailed information for a specific launch.
+
+        Args:
+            launch_id (int): The ID of the launch.
+
+        Returns:
+            dict: Launch details or error message.
+        """
+        if self.endpoint and self.project and self.uuid and launch_id:
+            try:
+                headers = {
+                    "Authorization": f"Bearer {self.uuid}"
+                }
+                url = f"{self.endpoint}/api/v1/{self.project}/launch/{launch_id}"
+                
+                req = Request('GET', url, headers=headers)
+                prepped = self.session.prepare_request(req)
+                response = self.session.send(prepped, verify=self.verify_ssl)
+                response.raise_for_status()
+                launch_data = response.json()
+                
+                return {
+                    'id': launch_data.get('id'),
+                    'name': launch_data.get('name'),
+                    'status': launch_data.get('status'),
+                    'startTime': launch_data.get('startTime'),
+                    'endTime': launch_data.get('endTime'),
+                    'duration': self._calculate_duration(launch_data.get('startTime'), launch_data.get('endTime')),
+                    'statistics': launch_data.get('statistics', {}),
+                    'attributes': launch_data.get('attributes', []),
+                    'mode': launch_data.get('mode'),
+                    'description': launch_data.get('description', '')
+                }
+            except requests.exceptions.RequestException as e:
+                return f"Error connecting to ReportPortal API for launch details: {e}"
+            except Exception as e:
+                return f"Error processing ReportPortal launch details: {e}"
+        return "ReportPortal configuration incomplete."
+
+    def get_test_logs(self, item_id):
+        """
+        Retrieves logs for a specific test item.
+
+        Args:
+            item_id (int): The ID of the test item.
+
+        Returns:
+            list: List of log entries or error message.
+        """
+        if self.endpoint and self.project and self.uuid and item_id:
+            try:
+                headers = {
+                    "Authorization": f"Bearer {self.uuid}"
+                }
+                url = f"{self.endpoint}/api/v1/{self.project}/log?filter.eq.item={item_id}&page.size=100"
+                
+                req = Request('GET', url, headers=headers)
+                prepped = self.session.prepare_request(req)
+                response = self.session.send(prepped, verify=self.verify_ssl)
+                response.raise_for_status()
+                logs_data = response.json()
+                
+                if 'content' in logs_data and isinstance(logs_data['content'], list):
+                    formatted_logs = []
+                    for log in logs_data['content']:
+                        formatted_logs.append({
+                            'level': log.get('level'),
+                            'message': log.get('message', ''),
+                            'time': log.get('time'),
+                            'file': log.get('file', {})
+                        })
+                    return formatted_logs
+                else:
+                    return []
+            except requests.exceptions.RequestException as e:
+                return f"Error connecting to ReportPortal API for logs: {e}"
+            except Exception as e:
+                return f"Error processing ReportPortal logs: {e}"
+        return "ReportPortal configuration incomplete."
+
+    def _calculate_duration(self, start_time, end_time):
+        """
+        Calculates duration in milliseconds between start and end times.
+
+        Args:
+            start_time (int): Start time in milliseconds.
+            end_time (int): End time in milliseconds.
+
+        Returns:
+            int: Duration in milliseconds, or 0 if times are not available.
+        """
+        if start_time and end_time:
+            return end_time - start_time
+        return 0

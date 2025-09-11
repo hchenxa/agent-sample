@@ -964,7 +964,7 @@ if prompt := st.chat_input("What is up?"):
                                         resp += f"  - {report.get('description', 'N/A')} (Score: {report.get('score', 'N/A')})\n"
                                 else:
                                     resp += "  N/A\n"
-                                resp += f"- **Color/Status:** {info.get('color', 'N/A').replace("_anime", " (building)")}\n"
+                                resp += f"- **Color/Status:** {info.get('color', 'N/A').replace('_anime', ' (building)')}\n"
                                 
                                 # Store info for later expander rendering
                                 st.session_state['jenkins_job_info_for_expander'] = {

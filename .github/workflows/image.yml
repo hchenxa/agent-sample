@@ -1,0 +1,45 @@
+name: Image
+
+on:
+  pull_request:
+    types:
+      - closed
+    branches: 
+      - main
+      - release-*.*
+
+env:
+  # Use docker.io for Docker Hub if empty
+  REGISTRY: quay.io/hchenxa
+
+jobs:
+  build:
+    if: github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{secrets.GH_TOKEN}}
+    steps:
+    - uses: actions/checkout@v4
+    - name: Buildah Action
+      id: build-image
+      uses: redhat-actions/buildah-build@v2
+      with:
+        image: agent-sample
+        tags: latest ${{ github.sha }}
+        containerfiles: |
+          ./Containerfile
+
+    - name: Log in to the GitHub Container registry
+      uses: redhat-actions/podman-login@v1
+      with:
+        registry: ${{ env.REGISTRY }}
+        username: ${{ secrets.QUAY_USER }}
+        password: ${{ secrets.QUAY_TOKEN }}
+
+    - name: Push to GitHub Container Repository
+      id: push-to-ghcr
+      uses: redhat-actions/push-to-registry@v2
+      with:
+        image: ${{ steps.build-image.outputs.image }}
+        tags: ${{ steps.build-image.outputs.tags }}
+        registry: ${{ env.REGISTRY }}

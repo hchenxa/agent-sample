@@ -13,14 +13,20 @@ from utils.config_manager import setup_configurations
 from utils.chat_history_manager import new_chat, get_active_chat, save_chat_session, render_chat_history_sidebar
 from utils.rp_analytics import ReportPortalAnalytics
 
+# Configure Streamlit page settings
+st.set_page_config(layout="wide")
+
 dotenv.load_dotenv()
 
 parser = argparse.ArgumentParser(description="Run Echo Chatbot with optional features.")
 parser.add_argument('--enable-slidev', action='store_true', help='Enable Slidev presentation generation for ReportPortal reports.')
+parser.add_argument('--show-sidebar', action='store_true', help='Show sidebar with configuration details (default: hidden for security).')
 args, unknown = parser.parse_known_args()
 
 if 'enable_slidev' not in st.session_state:
     st.session_state.enable_slidev = args.enable_slidev
+if 'show_sidebar' not in st.session_state:
+    st.session_state.show_sidebar = args.show_sidebar
 
 # Initialize flags at a higher scope to ensure they are always defined
 jenkins_handled = False
@@ -44,14 +50,18 @@ if "renaming_chat_id" not in st.session_state:
 if "jira_component_rules_content" not in st.session_state:
     st.session_state.jira_component_rules_content = ""
 
-render_chat_history_sidebar()
+if st.session_state.show_sidebar:
+    render_chat_history_sidebar()
 
-# File Upload Section in Sidebar
-with st.sidebar.expander("Upload File", expanded=False):
-    uploaded_file = st.file_uploader("Choose a file", type=["txt", "csv", "json", "log", "md", "py", "xml", "html", "css", "js", "ts", "tsx", "java", "c", "cpp", "h", "hpp", "go", "rs", "toml", "yaml", "yml", "ini", "cfg", "conf", "sh", "bash", "Dockerfile", "sql", "jsonl", "tsv", "parquet", "feather", "avro", "orc", "xlsx", "xls", "odt", "ods", "odp", "doc", "docx", "ppt", "pptx", "pdf", "png", "jpg", "jpeg", "gif", "bmp", "svg", "webp"]) # Broad range of types
+# --- Main App Layout ---
+st.title("Echo Chatbot")
+
+# File Upload Section in Main Area
+with st.expander("📎 Upload File", expanded=False):
+    uploaded_file = st.file_uploader("Choose a file to provide context to the chatbot", type=["txt", "csv", "json", "log", "md", "py", "xml", "html", "css", "js", "ts", "tsx", "java", "c", "cpp", "h", "hpp", "go", "rs", "toml", "yaml", "yml", "ini", "cfg", "conf", "sh", "bash", "Dockerfile", "sql", "jsonl", "tsv", "parquet", "feather", "avro", "orc", "xlsx", "xls", "odt", "ods", "odp", "doc", "docx", "ppt", "pptx", "pdf", "png", "jpg", "jpeg", "gif", "bmp", "svg", "webp"])
     if uploaded_file is not None:
         file_details = {"filename": uploaded_file.name, "filetype": uploaded_file.type, "filesize": uploaded_file.size}
-        st.write(file_details)
+        st.write(f"**File:** {uploaded_file.name} ({uploaded_file.size} bytes)")
 
         # Read file content based on type
         if uploaded_file.type and ("text" in uploaded_file.type or uploaded_file.type in [
@@ -64,20 +74,18 @@ with st.sidebar.expander("Upload File", expanded=False):
             string_data = uploaded_file.read().decode("utf-8")
             st.session_state['uploaded_file_content'] = string_data
             st.session_state['uploaded_file_name'] = uploaded_file.name
-            st.success(f"File '{uploaded_file.name}' uploaded and content stored.")
-            with st.expander("View File Content", expanded=False):
-                st.code(string_data, language=uploaded_file.name.split('.')[-1])
+            st.success(f"✓ File '{uploaded_file.name}' uploaded and ready for analysis!")
+            with st.expander("👁️ View File Content", expanded=False):
+                st.code(string_data, language=uploaded_file.name.split('.')[-1] if '.' in uploaded_file.name else 'text')
         elif uploaded_file.type and ("image" in uploaded_file.type or uploaded_file.type == "application/pdf"):
             st.warning(f"File '{uploaded_file.name}' is a binary file ({uploaded_file.type}). Content cannot be displayed directly as text.")
-            st.session_state['uploaded_file_content'] = uploaded_file.getvalue() # Store binary content
+            st.session_state['uploaded_file_content'] = uploaded_file.getvalue()
             st.session_state['uploaded_file_name'] = uploaded_file.name
         else:
             st.warning(f"Unsupported file type: {uploaded_file.type}. Content not stored for LLM analysis.")
             st.session_state['uploaded_file_content'] = None
             st.session_state['uploaded_file_name'] = None
 
-# --- Main App Layout ---
-st.title("Echo Chatbot")
 active_chat = get_active_chat()
 
 # Display past messages

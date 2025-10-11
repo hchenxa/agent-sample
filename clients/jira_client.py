@@ -1,6 +1,7 @@
 import os
 from jira import JIRA, JIRAError
 
+
 class JiraClient:
     def __init__(self, url, api_token, verify_ssl=True):
         self.url = url
@@ -15,12 +16,20 @@ class JiraClient:
             self.jira.myself()
         except JIRAError as e:
             print(f"DEBUG: JIRAError details: {e}")
-            raise ConnectionError(f"Failed to connect to Jira: {e.text}") from e
+            raise ConnectionError(
+                f"Failed to connect to Jira: {
+                    e.text}") from e
         except Exception as e:
             print(f"DEBUG: Unexpected exception type: {type(e)}, details: {e}")
-            raise ConnectionError(f"An unexpected error occurred during Jira client initialization or verification: {e}") from e
+            raise ConnectionError(
+                f"An unexpected error occurred during Jira client initialization or verification: {e}") from e
 
-    def query_issues(self, jql_query, project_key=None, components=None, max_results=50):
+    def query_issues(
+            self,
+            jql_query,
+            project_key=None,
+            components=None,
+            max_results=50):
         """
         Queries Jira issues using JQL (Jira Query Language), with optional project and component filters.
 
@@ -39,14 +48,17 @@ class JiraClient:
         full_jql_query = jql_query
         if project_key and 'project' not in jql_query.lower():
             full_jql_query = f"project = \"{project_key}\" AND {full_jql_query}"
-        
+
         if components:
-            component_jql = " OR ".join([f'component = "{c}"' for c in components])
+            component_jql = " OR ".join(
+                [f'component = "{c}"' for c in components])
             full_jql_query = f"({full_jql_query}) AND ({component_jql})"
 
-        print(f"DEBUG: Executing Jira query with JQL: {full_jql_query}, Max Results: {max_results}")
+        print(
+            f"DEBUG: Executing Jira query with JQL: {full_jql_query}, Max Results: {max_results}")
         try:
-            issues = self.jira.search_issues(full_jql_query, maxResults=max_results)
+            issues = self.jira.search_issues(
+                full_jql_query, maxResults=max_results)
             print(f"DEBUG: Jira search_issues returned {len(issues)} issues.")
             result = []
             for issue in issues:
@@ -78,7 +90,7 @@ class JiraClient:
         """
         if not self.jira:
             return "Jira connection not established."
-        
+
         try:
             user = self.jira.myself()
             return {
@@ -92,9 +104,11 @@ class JiraClient:
         except Exception as e:
             return f"An unexpected error occurred: {e}"
 
+
 if __name__ == '__main__':
     # Example Usage:
-    # Set these environment variables or replace with your actual Jira credentials
+    # Set these environment variables or replace with your actual Jira
+    # credentials
     JIRA_URL = os.getenv("JIRA_URL", "YOUR_JIRA_URL")
     JIRA_API_TOKEN = os.getenv("JIRA_API_TOKEN", "YOUR_JIRA_API_TOKEN")
 
@@ -106,25 +120,39 @@ if __name__ == '__main__':
         client = JiraClient(JIRA_URL, JIRA_API_TOKEN, verify_ssl=False)
 
         if client.jira:
-            print("\n--- Example: Querying 5 issues from a project (e.g., 'YOURPROJECT') ---")
-            # Replace 'YOURPROJECT' with an actual project key in your Jira instance
+            print(
+                "\n--- Example: Querying 5 issues from a project (e.g., 'YOURPROJECT') ---")
+            # Replace 'YOURPROJECT' with an actual project key in your Jira
+            # instance
             project_to_query = "YOURPROJECT"
             jql = "ORDER BY created DESC"
-            issues = client.query_issues(jql, project_key=project_to_query, max_results=5)
+            issues = client.query_issues(
+                jql, project_key=project_to_query, max_results=5)
             if isinstance(issues, list):
                 for issue in issues:
-                    print(f"  Key: {issue['key']}, Summary: {issue['summary']}, Status: {issue['status']}")
+                    print(
+                        f"  Key: {
+                            issue['key']}, Summary: {
+                            issue['summary']}, Status: {
+                            issue['status']}")
             else:
                 print(f"Error: {issues}")
 
-            print("\n--- Example: Querying issues assigned to a specific user (no project filter) ---")
+            print(
+                "\n--- Example: Querying issues assigned to a specific user (no project filter) ---")
             # Replace 'your_username' with an actual Jira username
             jql_assigned = "assignee = currentUser() AND status in ('To Do', 'In Progress') ORDER BY priority DESC"
             assigned_issues = client.query_issues(jql_assigned, max_results=3)
             if isinstance(assigned_issues, list):
-                print(f"Found {len(assigned_issues)} issues assigned to current user:")
+                print(
+                    f"Found {
+                        len(assigned_issues)} issues assigned to current user:")
                 for issue in assigned_issues:
-                    print(f"  Key: {issue['key']}, Summary: {issue['summary']}, Status: {issue['status']}")
+                    print(
+                        f"  Key: {
+                            issue['key']}, Summary: {
+                            issue['summary']}, Status: {
+                            issue['status']}")
             else:
                 print(f"Error: {assigned_issues}")
         else:

@@ -45,7 +45,12 @@ class AssistantClient:
         print("Debug - Request Payload:", payload)
 
         try:
-            response = requests.post(f"{self.base_url}/v1/chat/completions", headers=headers, json=payload, verify=self.verify_ssl)
+            response = requests.post(
+                f"{
+                    self.base_url}/v1/chat/completions",
+                headers=headers,
+                json=payload,
+                verify=self.verify_ssl)
             response.raise_for_status()
             data = response.json()
             message = data["choices"][0]["message"]["content"]
@@ -74,5 +79,5 @@ class AssistantClient:
         elif isinstance(prompt, list):
             messages = prompt
         else:
-            raise ValueError("prompt must be str or list of messages")       
+            raise ValueError("prompt must be str or list of messages")
         return self.chat(messages, **kwargs)

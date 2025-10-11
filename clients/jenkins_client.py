@@ -1,8 +1,10 @@
 import jenkins
 
+
 class JenkinsClient:
     def __init__(self, url, username, password):
-        self.server = jenkins.Jenkins(url, username=username, password=password)
+        self.server = jenkins.Jenkins(
+            url, username=username, password=password)
         self.server._session.verify = False
 
     def get_all_jobs(self, filter_keyword: str = None):
@@ -12,7 +14,8 @@ class JenkinsClient:
         try:
             jobs = self.server.get_jobs()
             if filter_keyword:
-                jobs = [job for job in jobs if filter_keyword.lower() in job['name'].lower()]
+                jobs = [job for job in jobs if filter_keyword.lower()
+                        in job['name'].lower()]
             return [job['name'] for job in jobs]
         except jenkins.JenkinsException as e:
             return f"Error connecting to Jenkins or fetching jobs: {e}"
@@ -46,7 +49,7 @@ class JenkinsClient:
         """
         try:
             views = self.server.get_views()
-            return views # Return full view objects
+            return views  # Return full view objects
         except jenkins.JenkinsException as e:
             return f"Error connecting to Jenkins or fetching views: {e}"
 
@@ -57,7 +60,7 @@ class JenkinsClient:
         try:
             info = self.server.get_job_info(job_name)
             raw_color = info.get('color', 'N/A')
-            
+
             status_map = {
                 "red": "🔴 Failed",
                 "blue": "🟢 Success",
@@ -72,7 +75,7 @@ class JenkinsClient:
                 "aborted_anime": "🔄 Building (Aborted)",
                 "grey_anime": "🔄 Building (Not Run)",
             }
-            
+
             status = status_map.get(raw_color, f"❓ {raw_color}")
             url = info.get('url', 'N/A')
             return {'name': job_name, 'status': status, 'url': url}
@@ -97,7 +100,8 @@ class JenkinsClient:
             build_info = self.server.get_build_info(job_name, build_number)
             parameters = {}
             for action in build_info.get('actions', []):
-                if '_class' in action and 'parameters' in action and "ParametersAction" in action['_class']:
+                if '_class' in action and 'parameters' in action and "ParametersAction" in action[
+                        '_class']:
                     for param in action['parameters']:
                         if 'name' in param and 'value' in param:
                             parameters[param['name']] = param['value']
@@ -106,6 +110,7 @@ class JenkinsClient:
         except jenkins.JenkinsException as e:
             return f"Error fetching parameters for build {build_number} of job '{job_name}': {e}"
 
+
 if __name__ == '__main__':
     # Example Usage: Replace with your Jenkins details and uncomment to run.
     JENKINS_URL = 'http://localhost:8080'
@@ -113,7 +118,10 @@ if __name__ == '__main__':
     JENKINS_API_TOKEN = 'your_api_token'
 
     try:
-        client = JenkinsClient(JENKINS_URL, JENKINS_USERNAME, JENKINS_API_TOKEN)
+        client = JenkinsClient(
+            JENKINS_URL,
+            JENKINS_USERNAME,
+            JENKINS_API_TOKEN)
 
         print("\n--- All Jenkins Jobs ---")
         jobs = client.get_all_jobs()
@@ -137,4 +145,3 @@ if __name__ == '__main__':
 
     except Exception as e:
         print(f"An error occurred during Jenkins client example usage: {e}")
-

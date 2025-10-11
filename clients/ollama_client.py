@@ -1,7 +1,9 @@
 import ollama
 
+
 class OllamaClient:
     """A client for interacting with Ollama models for text generation and chat."""
+
     def __init__(self, host="http://localhost:11434"):
         # The ollama library automatically uses OLLAMA_HOST environment variable
         # or defaults to http://localhost:11434.
@@ -49,12 +51,15 @@ class OllamaClient:
             print(f"Error in Ollama chat: {e}")
             return f"Error: {e}"
 
+
 if __name__ == '__main__':
     # Example usage:
-    # Make sure Ollama is running and you have a model pulled (e.g., ollama pull llama2)
+    # Make sure Ollama is running and you have a model pulled (e.g., ollama
+    # pull llama2)
     client = OllamaClient()
     print("--- Testing generate_text ---")
-    generated_response = client.generate_text(model='llama2', prompt='Tell me a short joke.')
+    generated_response = client.generate_text(
+        model='llama2', prompt='Tell me a short joke.')
     print(f"Generated: {generated_response}")
 
     print("")

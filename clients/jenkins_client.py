@@ -147,7 +147,7 @@ class JenkinsClient:
             jobs = self.server.get_jobs()
             current_time = datetime.now()
             analytics = {
-                'total_jobs': len(jobs),
+                'total_jobs': 0,  # Will be updated as we count actual jobs
                 'active_jobs': [],
                 'inactive_jobs': [],
                 'highly_active_jobs': [],
@@ -160,6 +160,15 @@ class JenkinsClient:
                 job_name = job['name']
                 try:
                     job_info = self.server.get_job_info(job_name)
+
+                    # Skip folders - only process actual jobs
+                    job_class = job_info.get('_class', '')
+                    if 'folder' in job_class.lower():
+                        print(
+                            f"DEBUG: Skipping folder: {job_name} "
+                            f"(class: {job_class})")
+                        continue
+
                     last_build = job_info.get('lastBuild')
 
                     job_data = {
@@ -168,6 +177,9 @@ class JenkinsClient:
                         'color': job_info.get('color', 'grey'),
                         'buildable': job_info.get('buildable', False)
                     }
+
+                    # Increment total jobs count (only for actual jobs)
+                    analytics['total_jobs'] += 1
 
                     if not last_build:
                         # Job never built
@@ -250,6 +262,11 @@ class JenkinsClient:
                 job_name = job['name']
                 try:
                     job_info = self.server.get_job_info(job_name)
+
+                    # Skip folders - only process actual jobs
+                    job_class = job_info.get('_class', '')
+                    if 'folder' in job_class.lower():
+                        continue
 
                     job_data = {
                         'name': job_name,

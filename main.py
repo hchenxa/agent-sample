@@ -1296,6 +1296,22 @@ if prompt := st.chat_input("What is up?"):
                     prompt_lower = jenkins_prompt.lower()
                     import re
 
+                    # New analytics commands
+                    server_info_match = re.search(
+                        r"(server info|jenkins info|jenkins version)",
+                        prompt_lower)
+                    job_analytics_match = re.search(
+                        r"(job analytics|job usage|job statistics)",
+                        prompt_lower)
+                    inactive_jobs_match = re.search(
+                        r"(inactive jobs|deprecated jobs|unused jobs)",
+                        prompt_lower)
+                    categorize_jobs_match = re.search(
+                        r"(categorize jobs|organize jobs|classify jobs|"
+                        r"group jobs)",
+                        prompt_lower)
+
+                    # Existing commands
                     list_jobs_match = re.search(
                         r"(list|show me|get) (all )?jobs(?: (?:related to|containing) (.+))?",
                         prompt_lower)
@@ -1312,7 +1328,161 @@ if prompt := st.chat_input("What is up?"):
                             bool(check_job_match)}, trigger_job_match: {
                             bool(trigger_job_match)}")
 
-                    if list_jobs_match or check_job_match or trigger_job_match or list_views_match:
+                    # Handle new analytics commands
+                    if server_info_match:
+                        print("DEBUG: Matched server info command.")
+                        server_info = jenkins_client.get_server_info()
+                        if isinstance(server_info, dict):
+                            resp = "### Jenkins Server Information\n\n"
+                            resp += f"**Version:** {server_info.get('version')}\n\n"
+                            whoami = server_info.get('whoami', {})
+                            resp += f"**Current User:** {whoami.get('fullName', 'N/A')}\n"
+                            resp += f"**Plugins Installed:** {server_info.get('plugin_count', 0)}\n"
+                        else:
+                            resp = server_info
+                        jenkins_handled = True
+
+                    elif job_analytics_match:
+                        print("DEBUG: Matched job analytics command.")
+                        with st.spinner("Analyzing job usage patterns..."):
+                            analytics = jenkins_client.get_job_usage_analytics(
+                                days_threshold=30)
+
+                        if isinstance(analytics, dict):
+                            resp = "### Jenkins Job Usage Analytics\n\n"
+                            resp += f"**Total Jobs:** {analytics['total_jobs']}\n"
+                            resp += f"**Active Jobs:** {len(analytics['active_jobs'])}\n"
+                            resp += f"**Inactive Jobs (>30 days):** {len(analytics['inactive_jobs'])}\n\n"
+
+                            # Show highly active jobs
+                            if analytics['highly_active_jobs']:
+                                resp += "#### 🔥 Highly Active Jobs\n"
+                                resp += "| Job Name | Last Build | Total Builds |\n"
+                                resp += "|---|---|---|\n"
+                                for job in analytics['highly_active_jobs'][:10]:
+                                    resp += (
+                                        f"| [{job['name']}]({job['url']}) | "
+                                        f"{job.get('days_since_last_build', 'N/A')} "
+                                        f"days ago | "
+                                        f"{job.get('total_builds', 0)} |\n"
+                                    )
+                                resp += "\n"
+
+                            # Show inactive jobs
+                            if analytics['inactive_jobs']:
+                                resp += "#### ⚠️ Inactive Jobs (Candidates for Deprecation)\n"
+                                resp += "| Job Name | Last Build | Days Inactive |\n"
+                                resp += "|---|---|---|\n"
+                                for job in analytics['inactive_jobs'][:10]:
+                                    days = job.get('days_since_last_build')
+                                    days_str = f"{days}" if days else "Never"
+                                    resp += (
+                                        f"| [{job['name']}]({job['url']}) | "
+                                        f"{job.get('last_build_time', 'Never')} | "
+                                        f"{days_str} |\n"
+                                    )
+
+                            # Store analytics for potential AI analysis
+                            st.session_state['jenkins_analytics'] = analytics
+                        else:
+                            resp = analytics
+                        jenkins_handled = True
+
+                    elif inactive_jobs_match:
+                        print("DEBUG: Matched inactive jobs command.")
+                        with st.spinner("Finding inactive jobs..."):
+                            analytics = jenkins_client.get_job_usage_analytics(
+                                days_threshold=30)
+
+                        if isinstance(analytics, dict):
+                            inactive = analytics['inactive_jobs']
+                            never_built = analytics['never_built_jobs']
+
+                            resp = "### Inactive Jenkins Jobs\n\n"
+                            resp += f"**Total Inactive Jobs:** {len(inactive)}\n"
+                            resp += f"**Never Built Jobs:** {len(never_built)}\n\n"
+
+                            if inactive:
+                                resp += "#### Jobs Not Used in Last 30 Days\n"
+                                resp += "| Job Name | Last Build | Days Inactive | Status |\n"
+                                resp += "|---|---|---|---|\n"
+                                for job in inactive[:20]:
+                                    days = job.get('days_since_last_build')
+                                    days_str = f"{days}" if days else "Never"
+                                    resp += (
+                                        f"| [{job['name']}]({job['url']}) | "
+                                        f"{job.get('last_build_time', 'Never')} | "
+                                        f"{days_str} days | "
+                                        f"{job.get('status', 'Unknown')} |\n"
+                                    )
+
+                                resp += "\n**Recommendation:** Consider archiving or deleting these jobs if they're no longer needed.\n"
+                        else:
+                            resp = analytics
+                        jenkins_handled = True
+
+                    elif categorize_jobs_match:
+                        print("DEBUG: Matched categorize jobs command.")
+                        with st.spinner("Fetching job information for AI categorization..."):
+                            jobs_data = jenkins_client.get_jobs_for_ai_categorization()
+
+                        if isinstance(jobs_data, list) and client:
+                            # Prepare data for LLM
+                            jobs_summary = []
+                            for job in jobs_data[:50]:  # Limit to 50 jobs
+                                summary = f"- **{job['name']}**"
+                                if job.get('description'):
+                                    summary += f": {job['description']}"
+                                summary += f" (Status: {job.get('color', 'unknown')})"
+                                jobs_summary.append(summary)
+
+                            categorization_prompt = (
+                                f"Analyze these Jenkins jobs and categorize "
+                                f"them into logical groups based on their "
+                                f"names and descriptions. Create categories "
+                                f"like: Testing, Deployment, Build, "
+                                f"Integration, Monitoring, etc.\n\n"
+                                f"Jobs:\n{chr(10).join(jobs_summary)}\n\n"
+                                f"Please provide:\n"
+                                f"1. A list of suggested categories\n"
+                                f"2. Which jobs belong to each category\n"
+                                f"3. Any jobs that seem deprecated or unused "
+                                f"(based on name patterns like 'old-', "
+                                f"'deprecated-', 'test-')\n"
+                                f"4. Recommendations for better organization\n\n"
+                                f"Format your response in markdown with clear "
+                                f"sections."
+                            )
+
+                            with st.spinner("AI is categorizing your Jenkins jobs..."):
+                                try:
+                                    if provider == "ollama":
+                                        ai_response = client.chat(
+                                            model=ollama_model,
+                                            messages=[{
+                                                "role": "user",
+                                                "content": categorization_prompt
+                                            }]
+                                        )
+                                    else:
+                                        ai_response = client.chat(
+                                            messages=[{
+                                                "role": "user",
+                                                "content": categorization_prompt
+                                            }]
+                                        )
+
+                                    resp = "### AI-Powered Jenkins Job Categorization\n\n"
+                                    resp += ai_response
+                                except Exception as e:
+                                    resp = f"Error during AI categorization: {e}"
+                        elif not client:
+                            resp = "LLM client is not configured. Cannot perform AI categorization."
+                        else:
+                            resp = jobs_data
+                        jenkins_handled = True
+
+                    elif list_jobs_match or check_job_match or trigger_job_match or list_views_match:
                         if list_jobs_match:
                             print("DEBUG: Matched list jobs command.")
                             jobs = jenkins_client.get_all_jobs(

@@ -6,6 +6,11 @@ Available Commands:
   - `/jenkins list views` or `list jenkins views`
   - `/jenkins check job <job_name>` or `check jenkins job <job_name>`
   - `/jenkins trigger job <job_name> [with params param1=value1,param2=value2]` or `trigger jenkins job <job_name> [with params param1=value1,param2=value2]`
+  - **NEW Analytics Commands:**
+    - `/jenkins server info` or `jenkins info` - Get server version and plugin information
+    - `/jenkins job analytics` or `job usage` - Analyze job usage patterns and find most/least used jobs
+    - `/jenkins inactive jobs` or `deprecated jobs` - Find jobs not used in the last 30 days
+    - `/jenkins categorize jobs` or `organize jobs` - AI-powered job categorization and organization suggestions
 - ReportPortal Commands (if configured):
     - `/rp list launches [attribute_key=attribute_value]`
 - Jira Commands (if configured):

@@ -1,4 +1,5 @@
 import jenkins
+from datetime import datetime
 
 
 class JenkinsClient:
@@ -109,6 +110,174 @@ class JenkinsClient:
             return parameters
         except jenkins.JenkinsException as e:
             return f"Error fetching parameters for build {build_number} of job '{job_name}': {e}"
+
+    def get_server_info(self):
+        """
+        Retrieves Jenkins server information including version,
+        plugins, and system info.
+        """
+        try:
+            version = self.server.get_version()
+            info = self.server.get_whoami()
+            plugins = self.server.get_plugins_info()
+
+            return {
+                'version': version,
+                'whoami': info,
+                'plugin_count': len(plugins),
+                'plugins': plugins
+            }
+        except jenkins.JenkinsException as e:
+            return f"Error fetching server info: {e}"
+
+    def get_job_usage_analytics(self, days_threshold=30):
+        """
+        Analyzes job usage patterns to identify frequently used jobs
+        and potentially deprecated jobs.
+
+        Args:
+            days_threshold (int): Number of days to consider
+                a job as inactive
+
+        Returns:
+            dict: Analytics data including active jobs, inactive jobs,
+                and usage statistics
+        """
+        try:
+            jobs = self.server.get_jobs()
+            current_time = datetime.now()
+            analytics = {
+                'total_jobs': len(jobs),
+                'active_jobs': [],
+                'inactive_jobs': [],
+                'highly_active_jobs': [],
+                'moderately_active_jobs': [],
+                'rarely_active_jobs': [],
+                'never_built_jobs': []
+            }
+
+            for job in jobs:
+                job_name = job['name']
+                try:
+                    job_info = self.server.get_job_info(job_name)
+                    last_build = job_info.get('lastBuild')
+
+                    job_data = {
+                        'name': job_name,
+                        'url': job_info.get('url'),
+                        'color': job_info.get('color', 'grey'),
+                        'buildable': job_info.get('buildable', False)
+                    }
+
+                    if not last_build:
+                        # Job never built
+                        job_data['status'] = 'Never Built'
+                        job_data['days_since_last_build'] = None
+                        job_data['total_builds'] = 0
+                        analytics['never_built_jobs'].append(job_data)
+                        analytics['inactive_jobs'].append(job_data)
+                    else:
+                        # Get last build info
+                        last_build_number = last_build.get('number', 0)
+                        first_build = job_info.get('firstBuild', {})
+                        first_build_number = first_build.get('number', 0)
+
+                        total_builds = last_build_number - \
+                            first_build_number + 1
+
+                        # Get timestamp
+                        last_build_info = self.server.get_build_info(
+                            job_name, last_build_number)
+                        timestamp_ms = last_build_info.get('timestamp', 0)
+                        last_build_time = datetime.fromtimestamp(
+                            timestamp_ms / 1000.0)
+                        days_since = (
+                            current_time - last_build_time).days
+
+                        job_data['last_build_number'] = last_build_number
+                        job_data['total_builds'] = total_builds
+                        job_data['days_since_last_build'] = days_since
+                        job_data['last_build_time'] = \
+                            last_build_time.strftime('%Y-%m-%d %H:%M:%S')
+
+                        # Categorize by activity
+                        if days_since > days_threshold:
+                            job_data['status'] = 'Inactive'
+                            analytics['inactive_jobs'].append(job_data)
+                        else:
+                            job_data['status'] = 'Active'
+                            analytics['active_jobs'].append(job_data)
+
+                            # Further categorize active jobs by build frequency
+                            if total_builds > 100 or days_since < 7:
+                                analytics['highly_active_jobs'].append(
+                                    job_data)
+                            elif total_builds > 20 or days_since < 14:
+                                analytics['moderately_active_jobs'].append(
+                                    job_data)
+                            else:
+                                analytics['rarely_active_jobs'].append(
+                                    job_data)
+
+                except jenkins.JenkinsException as e:
+                    print(f"Error analyzing job {job_name}: {e}")
+                    continue
+
+            # Sort jobs by days since last build
+            analytics['inactive_jobs'].sort(
+                key=lambda x: x.get('days_since_last_build')
+                if x.get('days_since_last_build') is not None else 999999,
+                reverse=True
+            )
+            analytics['active_jobs'].sort(
+                key=lambda x: x.get('days_since_last_build', 0))
+
+            return analytics
+
+        except jenkins.JenkinsException as e:
+            return f"Error fetching job usage analytics: {e}"
+
+    def get_jobs_for_ai_categorization(self):
+        """
+        Retrieves job information formatted for AI categorization.
+        Returns job names, descriptions, and recent build info.
+        """
+        try:
+            jobs = self.server.get_jobs()
+            jobs_data = []
+
+            for job in jobs:
+                job_name = job['name']
+                try:
+                    job_info = self.server.get_job_info(job_name)
+
+                    job_data = {
+                        'name': job_name,
+                        'description': job_info.get('description', ''),
+                        'url': job_info.get('url', ''),
+                        'buildable': job_info.get('buildable', False),
+                        'color': job_info.get('color', 'grey')
+                    }
+
+                    # Get last successful build info if available
+                    last_success = job_info.get('lastSuccessfulBuild')
+                    if last_success:
+                        job_data['has_successful_builds'] = True
+                        job_data['last_success_number'] = \
+                            last_success.get('number')
+                    else:
+                        job_data['has_successful_builds'] = False
+
+                    jobs_data.append(job_data)
+
+                except jenkins.JenkinsException as e:
+                    print(f"Error fetching info for job {job_name}: {e}")
+                    continue
+
+            return jobs_data
+
+        except jenkins.JenkinsException as e:
+            return f"Error fetching jobs for categorization: {e}"
 
 
 if __name__ == '__main__':

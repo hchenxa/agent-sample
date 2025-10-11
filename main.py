@@ -1362,10 +1362,16 @@ if prompt := st.chat_input("What is up?"):
 
                             # Show highly active jobs
                             if analytics['highly_active_jobs']:
-                                resp += "#### 🔥 Highly Active Jobs\n"
+                                highly_active_count = len(
+                                    analytics['highly_active_jobs'])
+                                resp += (
+                                    f"#### 🔥 Highly Active Jobs "
+                                    f"({highly_active_count} total)\n"
+                                )
                                 resp += "| Job Name | Last Build | Total Builds |\n"
                                 resp += "|---|---|---|\n"
-                                for job in analytics['highly_active_jobs'][:10]:
+                                # Show all highly active jobs
+                                for job in analytics['highly_active_jobs']:
                                     resp += (
                                         f"| [{job['name']}]({job['url']}) | "
                                         f"{job.get('days_since_last_build', 'N/A')} "
@@ -1376,10 +1382,15 @@ if prompt := st.chat_input("What is up?"):
 
                             # Show inactive jobs
                             if analytics['inactive_jobs']:
-                                resp += "#### ⚠️ Inactive Jobs (Candidates for Deprecation)\n"
+                                inactive_count = len(analytics['inactive_jobs'])
+                                resp += (
+                                    f"#### ⚠️ Inactive Jobs "
+                                    f"({inactive_count} total)\n"
+                                )
                                 resp += "| Job Name | Last Build | Days Inactive |\n"
                                 resp += "|---|---|---|\n"
-                                for job in analytics['inactive_jobs'][:10]:
+                                # Show all inactive jobs (not limited)
+                                for job in analytics['inactive_jobs']:
                                     days = job.get('days_since_last_build')
                                     days_str = f"{days}" if days else "Never"
                                     resp += (
@@ -1409,10 +1420,14 @@ if prompt := st.chat_input("What is up?"):
                             resp += f"**Never Built Jobs:** {len(never_built)}\n\n"
 
                             if inactive:
-                                resp += "#### Jobs Not Used in Last 30 Days\n"
+                                resp += (
+                                    f"#### Jobs Not Used in Last 30 Days "
+                                    f"(Showing all {len(inactive)} jobs)\n"
+                                )
                                 resp += "| Job Name | Last Build | Days Inactive | Status |\n"
                                 resp += "|---|---|---|---|\n"
-                                for job in inactive[:20]:
+                                # Show all inactive jobs (not limited)
+                                for job in inactive:
                                     days = job.get('days_since_last_build')
                                     days_str = f"{days}" if days else "Never"
                                     resp += (
@@ -1422,7 +1437,10 @@ if prompt := st.chat_input("What is up?"):
                                         f"{job.get('status', 'Unknown')} |\n"
                                     )
 
-                                resp += "\n**Recommendation:** Consider archiving or deleting these jobs if they're no longer needed.\n"
+                                resp += (
+                                    "\n**Recommendation:** Consider archiving or "
+                                    "deleting these jobs if they're no longer needed.\n"
+                                )
                         else:
                             resp = analytics
                         jenkins_handled = True

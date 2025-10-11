@@ -141,7 +141,10 @@ if __name__ == '__main__':
         # job_with_params = 'your_parameterized_job_name'
         # params = {'PARAM1': 'value1', 'PARAM2': 'value2'}
         # trigger_result_params = client.build_job(job_with_params, params)
-        # print(f"\n--- Triggering job '{job_with_params}' with parameters ---\n{trigger_result_params}")
+        # print(
+        #     f"\n--- Triggering job '{job_with_params}' "
+        #     f"with parameters ---\n{trigger_result_params}"
+        # )
 
     except Exception as e:
         print(f"An error occurred during Jenkins client example usage: {e}")

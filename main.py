@@ -9,7 +9,10 @@ import matplotlib.pyplot as plt
 import subprocess
 import socket
 from utils.config_manager import setup_configurations
-from utils.chat_history_manager import new_chat, get_active_chat, save_chat_session, render_chat_history_sidebar
+from utils.chat_history_manager import (
+    new_chat, get_active_chat, save_chat_session,
+    render_chat_history_sidebar
+)
 from utils.rp_analytics import ReportPortalAnalytics
 
 # Configure Streamlit page settings
@@ -41,7 +44,8 @@ jira_handled = False
 skip_llm_analysis = False
 charts_and_analysis_rendered = False
 
-client, jenkins_client, rp_manager, jira_client, jira_project_key, provider, ollama_model = setup_configurations()
+(client, jenkins_client, rp_manager, jira_client,
+ jira_project_key, provider, ollama_model) = setup_configurations()
 
 
 def read_prompt_file(filename):
@@ -233,9 +237,14 @@ if prompt := st.chat_input("What is up?"):
                 if rp_manager and not jenkins_handled:
                     print(
                         f"DEBUG: Attempting general RP prompt parsing for: {prompt}")
+                    rp_general_pattern = (
+                        r"(?:test report for|test report of|analysis for|"
+                        r"data for)\s+(?:component\s*=\s*|component\s*:\s*)?"
+                        r"([a-zA-Z0-9_.-]+)(?:\s+in\s+release\s*=\s*|"
+                        r"\s+in\s+release\s*:\s*)?([a-zA-Z0-9_.-]+)?"
+                    )
                     rp_general_match = re.search(
-                        r"(?:test report for|test report of|analysis for|data for)\s+(?:component\s*=\s*|component\s*:\s*)?([a-zA-Z0-9_.-]+)(?:\s+in\s+release\s*=\s*|\s+in\s+release\s*:\s*)?([a-zA-Z0-9_.-]+)?",
-                        prompt.lower())
+                        rp_general_pattern, prompt.lower())
 
                     extracted_filters = []
                     if rp_general_match:
@@ -924,7 +933,13 @@ if prompt := st.chat_input("What is up?"):
                                 launch['total']} ({
                                 launch['pass_rate']})\n"
 
-                        analysis_prompt += "\nBased on this comprehensive analysis, please provide insights on test quality, stability, performance, and recommendations for improvement. Focus on identifying trends, root causes, and actionable next steps."
+                        analysis_prompt += (
+                            "\nBased on this comprehensive analysis, "
+                            "please provide insights on test quality, "
+                            "stability, performance, and recommendations "
+                            "for improvement. Focus on identifying trends, "
+                            "root causes, and actionable next steps."
+                        )
 
                         try:
                             llm_analysis_resp = client.chat(
@@ -946,7 +961,16 @@ if prompt := st.chat_input("What is up?"):
                         os.makedirs(slidev_output_dir, exist_ok=True)
 
                         # Generate Enhanced Slidev Markdown content
-                        slidev_content = "---\ntheme: default\nclass: text-center\nhighlighter: shiki\nlineNumbers: false\ninfo: |\n  ## ReportPortal Enhanced Analysis\n  Comprehensive test quality and performance insights\ndrawings:\n  persist: false\ntransition: slide-left\ntitle: ReportPortal Analysis\n---\n\n"
+                        slidev_content = (
+                            "---\ntheme: default\nclass: text-center\n"
+                            "highlighter: shiki\nlineNumbers: false\n"
+                            "info: |\n"
+                            "  ## ReportPortal Enhanced Analysis\n"
+                            "  Comprehensive test quality and performance "
+                            "insights\ndrawings:\n  persist: false\n"
+                            "transition: slide-left\n"
+                            "title: ReportPortal Analysis\n---\n\n"
+                        )
                         slidev_content += "# 📊 ReportPortal Enhanced Analysis\n\n"
                         slidev_content += "Comprehensive Test Quality & Performance Report\n\n"
                         slidev_content += f"Generated: {
@@ -1217,7 +1241,20 @@ if prompt := st.chat_input("What is up?"):
                                 server_url = f"http://{server_ip}:3030/"
                                 st.session_state.slidev_server_url = server_url
                                 st.session_state.slidev_server_started = True
-                                resp += f"\n\n**Slidev Presentation:** [Click here to open]({server_url})\n(Slidev server started on port 3030 in the background. To access from your local machine, create an SSH tunnel:\n`ssh -L 3030:localhost:3030 user@{server_ip}`\nThen open `{server_url}` in your local browser. If the link doesn't work, port 3030 might be in use on the remote server or {server_ip} is not publicly accessible.)"
+                                resp += (
+                                    f"\n\n**Slidev Presentation:** "
+                                    f"[Click here to open]({server_url})\n"
+                                    f"(Slidev server started on port 3030 "
+                                    f"in the background. To access from your "
+                                    f"local machine, create an SSH tunnel:\n"
+                                    f"`ssh -L 3030:localhost:3030 "
+                                    f"user@{server_ip}`\n"
+                                    f"Then open `{server_url}` in your local "
+                                    f"browser. If the link doesn't work, "
+                                    f"port 3030 might be in use on the "
+                                    f"remote server or {server_ip} is not "
+                                    f"publicly accessible.)"
+                                )
                             else:
                                 # If server is already started, just provide
                                 # the existing URL
@@ -1234,7 +1271,14 @@ if prompt := st.chat_input("What is up?"):
                                         server_ip = "localhost"
                                     server_url = f"http://{server_ip}:3030/"
                                     st.session_state.slidev_server_url = server_url
-                                    resp += f"\n\n**Slidev Presentation:** [Click here to open]({server_url})\n(Slidev server was previously started on port 3030. Remember to use SSH tunneling if accessing remotely.)"
+                                    resp += (
+                                        f"\n\n**Slidev Presentation:** "
+                                        f"[Click here to open]({server_url})\n"
+                                        f"(Slidev server was previously "
+                                        f"started on port 3030. Remember to "
+                                        f"use SSH tunneling if accessing "
+                                        f"remotely.)"
+                                    )
 
                         # This is a placeholder for the "send me a link" part.
                         # In a real scenario, you'd need a way to start a web server
@@ -1401,7 +1445,13 @@ if prompt := st.chat_input("What is up?"):
                             jenkins_handled = True
 
                     if not jenkins_handled and jenkins_command_explicit:
-                        resp = "I didn't understand your Jenkins command. Try 'list jenkins jobs', 'check jenkins job <job_name>', or 'trigger jenkins job <job_name> [with params param1=value1,param2=value2]'."
+                        resp = (
+                            "I didn't understand your Jenkins command. "
+                            "Try 'list jenkins jobs', "
+                            "'check jenkins job <job_name>', or "
+                            "'trigger jenkins job <job_name> "
+                            "[with params param1=value1,param2=value2]'."
+                        )
                         jenkins_handled = True  # Ensure it's handled by Jenkins logic, even if unrecognized
                         print(
                             f"DEBUG: Jenkins explicit command not understood. resp: {resp}")
@@ -1560,7 +1610,14 @@ if not st.session_state.chat_sessions:
 #            for test_name, count in Counter(all_failed_test_names).most_common(5):
 #                analysis_prompt += f"- {test_name} (Failed {count} times)\n"
 #
-#        analysis_prompt += "\nBased on this data, including the Pass Rate Trend Chart and OCP Platform Test Coverage Chart, and the user's original request, please provide a comprehensive analysis. Focus on aspects like pass rates, test coverage across platforms, and identifying unstable tests. Describe the trends and insights observed in the charts."
+#        analysis_prompt += (
+#            "\nBased on this data, including the Pass Rate Trend Chart "
+#            "and OCP Platform Test Coverage Chart, and the user's "
+#            "original request, please provide a comprehensive analysis. "
+#            "Focus on aspects like pass rates, test coverage across "
+#            "platforms, and identifying unstable tests. Describe the "
+#            "trends and insights observed in the charts."
+#        )
 #
 #        try:
 #            llm_analysis_resp = client.chat(messages=[{"role": "user", "content": analysis_prompt}])

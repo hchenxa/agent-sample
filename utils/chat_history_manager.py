@@ -80,7 +80,8 @@ def get_active_chat():
 
 
 def save_chat_session():
-    """Saves the current chat session, renaming 'New Chat' sessions based on the first user message."""
+    """Saves the current chat session, renaming 'New Chat' sessions
+    based on the first user message."""
     active_chat = get_active_chat()
     if active_chat and active_chat["messages"] and active_chat["name"] == "New Chat":
         first_user_message = next(

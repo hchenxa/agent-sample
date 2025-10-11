@@ -1301,6 +1301,9 @@ if prompt := st.chat_input("What is up?"):
                     import re
 
                     # New analytics commands
+                    jenkins_health_match = re.search(
+                        r"(jenkins health|health check|health report|health status|^health$)",
+                        prompt_lower)
                     server_info_match = re.search(
                         r"(server info|jenkins info|jenkins version)",
                         prompt_lower)
@@ -1333,20 +1336,242 @@ if prompt := st.chat_input("What is up?"):
                             bool(trigger_job_match)}")
 
                     # Handle new analytics commands
-                    if server_info_match:
+                    if jenkins_health_match:
+                        print("DEBUG: Matched jenkins health command.")
+                        if not jenkins_client:
+                            resp = (
+                                "❌ Jenkins client is not configured. "
+                                "Please configure Jenkins credentials in the sidebar."
+                            )
+                            jenkins_handled = True
+                        else:
+                            with st.spinner(
+                                "Generating Jenkins health report..."
+                            ):
+                                health_report = jenkins_client.get_jenkins_health()
+
+                            if isinstance(health_report, dict):
+                                # Summary section
+                                summary = health_report['summary']
+                                resp = "### 🏥 Jenkins Health Report\n\n"
+                                resp += "#### 📊 Overview\n"
+                                resp += f"- **Total Jobs:** {summary['total_jobs']}\n"
+                                resp += (
+                                    f"- **Active Jobs:** "
+                                    f"{summary['active_jobs']} ✅\n"
+                                )
+                                resp += (
+                                    f"- **Inactive Jobs:** "
+                                    f"{summary['inactive_jobs']} ⚠️\n"
+                                )
+                                resp += (
+                                    f"- **Highly Active Jobs:** "
+                                    f"{summary['highly_active_jobs']}\n"
+                                )
+                                resp += (
+                                    f"- **Never Built Jobs:** "
+                                    f"{summary['never_built_jobs']}\n\n"
+                                )
+
+                                # Health metrics
+                                if health_report.get('health_metrics'):
+                                    metrics = health_report['health_metrics']
+                                    resp += "#### 💊 Health Metrics\n"
+                                    resp += (
+                                        f"- **Average Success Rate:** "
+                                        f"{metrics.get('avg_success_rate', 0):.1f}%\n"
+                                    )
+                                    resp += (
+                                        f"- **Critical Jobs:** "
+                                        f"{metrics.get('critical_jobs', 0)} 🔴\n"
+                                    )
+                                    resp += (
+                                        f"- **Poor Health Jobs:** "
+                                        f"{metrics.get('poor_jobs', 0)} 🟠\n"
+                                    )
+                                    resp += (
+                                        f"- **Flaky Jobs:** "
+                                        f"{metrics.get('flaky_jobs', 0)} ⚡\n\n"
+                                    )
+
+                                # Recommendations
+                                if health_report.get('recommendations'):
+                                    resp += "#### 💡 Recommendations\n"
+                                    for rec in health_report['recommendations']:
+                                        resp += f"- {rec}\n"
+                                    resp += "\n"
+
+                                # Store data for charts
+                                st.session_state[
+                                    'jenkins_health_data'
+                                ] = health_report
+
+                                # Chart 1: Job Stability Distribution
+                                if health_report['chart_data'].get(
+                                    'stability_distribution'
+                                ):
+                                    st.subheader("📈 Job Stability Distribution")
+                                    stability_data = health_report[
+                                        'chart_data'
+                                    ]['stability_distribution']
+
+                                    import matplotlib.pyplot as plt
+                                    fig1, ax1 = plt.subplots(figsize=(10, 6))
+                                    categories = list(stability_data.keys())
+                                    counts = list(stability_data.values())
+                                    colors = [
+                                        '#2ecc71',
+                                        '#f39c12',
+                                        '#e67e22',
+                                        '#e74c3c'
+                                    ]
+                                    ax1.bar(categories, counts, color=colors)
+                                    ax1.set_title(
+                                        'Job Stability Distribution',
+                                        fontsize=14,
+                                        fontweight='bold'
+                                    )
+                                    ax1.set_ylabel('Number of Jobs')
+                                    ax1.set_xlabel('Health Status')
+                                    plt.xticks(rotation=15, ha='right')
+                                    plt.tight_layout()
+                                    st.pyplot(fig1)
+                                    plt.close(fig1)
+
+                                # Chart 2: Top Failing Jobs
+                                failure_data = health_report['chart_data'].get(
+                                    'failure_rates'
+                                )
+                                if failure_data and failure_data['job_names']:
+                                    st.subheader("❌ Top Failing Jobs")
+                                    fig2, ax2 = plt.subplots(figsize=(12, 6))
+                                    jobs = failure_data['job_names']
+                                    failure_rates = failure_data[
+                                        'failure_rates'
+                                    ]
+                                    ax2.barh(jobs, failure_rates, color='#e74c3c')
+                                    ax2.set_title(
+                                        'Top 15 Failing Jobs (Failure Rate %)',
+                                        fontsize=14,
+                                        fontweight='bold'
+                                    )
+                                    ax2.set_xlabel('Failure Rate (%)')
+                                    ax2.invert_yaxis()
+                                    plt.tight_layout()
+                                    st.pyplot(fig2)
+                                    plt.close(fig2)
+
+                                # Chart 3: Build Frequency
+                                freq_data = health_report['chart_data'].get(
+                                    'build_frequency'
+                                )
+                                if freq_data and freq_data['job_names']:
+                                    st.subheader("🔥 Top Active Jobs")
+                                    fig3, ax3 = plt.subplots(figsize=(12, 6))
+                                    jobs = freq_data['job_names']
+                                    builds = freq_data['total_builds']
+                                    ax3.barh(jobs, builds, color='#3498db')
+                                    ax3.set_title(
+                                        'Top 10 Most Active Jobs (Total Builds)',
+                                        fontsize=14,
+                                        fontweight='bold'
+                                    )
+                                    ax3.set_xlabel('Total Builds')
+                                    ax3.invert_yaxis()
+                                    plt.tight_layout()
+                                    st.pyplot(fig3)
+                                    plt.close(fig3)
+
+                                # Detailed tables
+                                # Critical/Flaky jobs
+                                if metrics.get('critical_job_list'):
+                                    st.subheader("🔴 Critical Jobs Details")
+                                    resp += "\n#### 🔴 Critical Jobs\n"
+                                    resp += (
+                                        "| Job | Health | Success Rate | "
+                                        "Recent Builds |\n"
+                                    )
+                                    resp += "|---|---|---|---|\n"
+                                    for job in metrics['critical_job_list'][:10]:
+                                        builds = job.get('build_health', [])
+                                        build_str = ' '.join(
+                                            '✅' if b == 'SUCCESS'
+                                            else '❌' if b == 'FAILURE'
+                                            else '🟡' if b == 'UNSTABLE'
+                                            else '⚪'
+                                            for b in builds[:8]
+                                        )
+                                        resp += (
+                                            f"| [{job['name']}]({job['url']}) | "
+                                            f"{job.get('health_status', 'N/A')} | "
+                                            f"{job.get('success_rate', 0)}% | "
+                                            f"{build_str} |\n"
+                                        )
+                                    resp += "\n"
+
+                                # Jobs to deprecate
+                                if health_report.get('deprecated_candidates'):
+                                    candidates = health_report[
+                                        'deprecated_candidates'
+                                    ]
+                                    if candidates:
+                                        st.subheader(
+                                            f"🗑️ Jobs Recommended for "
+                                            f"Deprecation ({len(candidates)})"
+                                        )
+                                        resp += (
+                                            f"\n#### 🗑️ Deprecated Candidates "
+                                            f"(Top 20)\n"
+                                        )
+                                        resp += (
+                                            "| Job Name | Status | "
+                                            "Days Inactive |\n"
+                                        )
+                                        resp += "|---|---|---|\n"
+                                        for job in candidates[:20]:
+                                            days = job.get(
+                                                'days_since_last_build'
+                                            )
+                                            days_str = (
+                                                f"{days}" if days else "Never"
+                                            )
+                                            resp += (
+                                                f"| [{job['name']}]({job['url']}) | "
+                                                f"{job.get('status', 'Unknown')} | "
+                                                f"{days_str} |\n"
+                                            )
+
+                            else:
+                                resp = health_report
+                            jenkins_handled = True
+
+                    elif server_info_match:
                         print(
                             f"DEBUG: Matched server info command. "
                             f"jenkins_client exists: {jenkins_client is not None}")
-                        server_info = jenkins_client.get_server_info()
-                        if isinstance(server_info, dict):
-                            resp = "### Jenkins Server Information\n\n"
-                            resp += f"**Version:** {server_info.get('version')}\n\n"
-                            whoami = server_info.get('whoami', {})
-                            resp += f"**Current User:** {whoami.get('fullName', 'N/A')}\n"
-                            resp += f"**Plugins Installed:** {server_info.get('plugin_count', 0)}\n"
+                        if not jenkins_client:
+                            resp = "❌ Jenkins client is not configured. Please configure Jenkins credentials in the sidebar."
+                            jenkins_handled = True
                         else:
-                            resp = server_info
-                        jenkins_handled = True
+                            with st.spinner("Fetching jobs information..."):
+                                # Use optimized method for faster loading
+                                jobs_with_status = jenkins_client.get_all_jobs_with_status()
+
+                            if isinstance(jobs_with_status, list):
+                                if jobs_with_status:
+                                    resp = f"### 📋 Jenkins Jobs ({len(jobs_with_status)} total)\n\n"
+                                    resp += "| Job Name | Status | URL |\n|---|---|---|\n"
+                                    for job_detail in jobs_with_status:
+                                        resp += (
+                                            f"| {job_detail['name']} | "
+                                            f"{job_detail['status']} | "
+                                            f"{job_detail['url']} |\n"
+                                        )
+                                else:
+                                    resp = "No Jenkins jobs found."
+                            else:
+                                resp = jobs_with_status  # Error message from client
+                            jenkins_handled = True
 
                     elif job_analytics_match:
                         print("DEBUG: Matched job analytics command.")
@@ -1355,12 +1580,66 @@ if prompt := st.chat_input("What is up?"):
                                 days_threshold=30)
 
                         if isinstance(analytics, dict):
-                            resp = "### Jenkins Job Usage Analytics\n\n"
+                            resp = "### 📊 Jenkins Job Usage & Health Analytics\n\n"
+
+                            # Overall Summary
+                            resp += "#### 📈 Overall Summary\n"
                             resp += f"**Total Jobs:** {analytics['total_jobs']}\n"
                             resp += f"**Active Jobs:** {len(analytics['active_jobs'])}\n"
-                            resp += f"**Inactive Jobs (>30 days):** {len(analytics['inactive_jobs'])}\n\n"
+                            resp += f"**Inactive Jobs (>30 days):** {len(analytics['inactive_jobs'])}\n"
 
-                            # Show highly active jobs
+                            # Add health summary if available
+                            health_summary = analytics.get('health_summary')
+                            if health_summary:
+                                avg_success = health_summary.get('avg_success_rate', 0)
+                                resp += f"**Average Success Rate:** {avg_success}%\n\n"
+
+                                # Critical and Flaky Jobs Alert
+                                critical = health_summary.get('critical_jobs', [])
+                                poor = health_summary.get('poor_jobs', [])
+                                flaky = health_summary.get('flaky_jobs', [])
+
+                                if critical or poor or flaky:
+                                    resp += "#### ⚠️ Health Alerts\n"
+                                    if critical:
+                                        resp += (
+                                            f"**🔴 Critical Jobs (<50% success):** "
+                                            f"{len(critical)}\n"
+                                        )
+                                    if poor:
+                                        resp += (
+                                            f"**🟠 Poor Jobs (<70% success):** "
+                                            f"{len(poor)}\n"
+                                        )
+                                    if flaky:
+                                        resp += f"**⚡ Flaky Jobs:** {len(flaky)}\n"
+                                    resp += "\n"
+
+                                    # Show details of critical/flaky jobs
+                                    if critical or flaky:
+                                        resp += "| Job | Health | Success Rate | Recent Builds |\n"
+                                        resp += "|---|---|---|---|\n"
+
+                                        for job in (critical + flaky)[:10]:
+                                            builds = job.get('build_health', [])
+                                            build_str = ' '.join(
+                                                '✅' if b == 'SUCCESS'
+                                                else '❌' if b == 'FAILURE'
+                                                else '🟡' if b == 'UNSTABLE'
+                                                else '⚪'
+                                                for b in builds[:8]
+                                            )
+                                            resp += (
+                                                f"| [{job['name']}]({job['url']}) | "
+                                                f"{job.get('health_status', 'Unknown')} | "
+                                                f"{job.get('success_rate', 'N/A')}% | "
+                                                f"{build_str} |\n"
+                                            )
+                                        resp += "\n"
+                            else:
+                                resp += "\n"
+
+                            # Show highly active jobs with health metrics
                             if analytics['highly_active_jobs']:
                                 highly_active_count = len(
                                     analytics['highly_active_jobs'])
@@ -1368,15 +1647,24 @@ if prompt := st.chat_input("What is up?"):
                                     f"#### 🔥 Highly Active Jobs "
                                     f"({highly_active_count} total)\n"
                                 )
-                                resp += "| Job Name | Last Build | Total Builds |\n"
-                                resp += "|---|---|---|\n"
+                                resp += "| Job Name | Health | Success Rate | Avg Duration | Last Build |\n"
+                                resp += "|---|---|---|---|---|\n"
                                 # Show all highly active jobs
                                 for job in analytics['highly_active_jobs']:
+                                    health = job.get('health_status', 'Unknown')
+                                    success = job.get('success_rate')
+                                    success_str = f"{success}%" if success else "N/A"
+                                    duration = job.get('avg_duration')
+                                    duration_str = f"{duration} min" if duration else "N/A"
+                                    days = job.get('days_since_last_build', 'N/A')
+                                    days_str = f"{days} days ago" if isinstance(days, int) else days
+
                                     resp += (
                                         f"| [{job['name']}]({job['url']}) | "
-                                        f"{job.get('days_since_last_build', 'N/A')} "
-                                        f"days ago | "
-                                        f"{job.get('total_builds', 0)} |\n"
+                                        f"{health} | "
+                                        f"{success_str} | "
+                                        f"{duration_str} | "
+                                        f"{days_str} |\n"
                                     )
                                 resp += "\n"
 
@@ -1509,30 +1797,25 @@ if prompt := st.chat_input("What is up?"):
                     elif list_jobs_match or check_job_match or trigger_job_match or list_views_match:
                         if list_jobs_match:
                             print("DEBUG: Matched list jobs command.")
-                            jobs = jenkins_client.get_all_jobs(
-                                filter_keyword=list_jobs_match.group(3))
-                            if isinstance(jobs, list):
-                                if jobs:
-                                    table_header = "| Job Name | Status | URL |\n|---|---|---|\n"
-                                    table_rows = []
-                                    for job_name in jobs:
-                                        job_details = jenkins_client.get_job_status_and_url(
-                                            job_name)
-                                        if isinstance(job_details, dict):
-                                            table_rows.append(
-                                                f"| {
-                                                    job_details['name']} | {
-                                                    job_details['status']} | {
-                                                    job_details['url']} |")
-                                        else:
-                                            table_rows.append(
-                                                f"| {job_name} | Error: {job_details} | N/A |")
-                                    resp = "### Available Jenkins Jobs:\n" + \
-                                        table_header + "\n".join(table_rows)
+                            # Use optimized method that fetches all statuses in parallel
+                            with st.spinner("Fetching jobs..."):
+                                jobs_with_status = jenkins_client.get_all_jobs_with_status(
+                                    filter_keyword=list_jobs_match.group(3))
+
+                            if isinstance(jobs_with_status, list):
+                                if jobs_with_status:
+                                    resp = f"### Available Jenkins Jobs ({len(jobs_with_status)} total)\n\n"
+                                    resp += "| Job Name | Status | URL |\n|---|---|---|\n"
+                                    for job_detail in jobs_with_status:
+                                        resp += (
+                                            f"| {job_detail['name']} | "
+                                            f"{job_detail['status']} | "
+                                            f"{job_detail['url']} |\n"
+                                        )
                                 else:
                                     resp = "No Jenkins jobs found."
                             else:
-                                resp = jobs  # Error message from client
+                                resp = jobs_with_status  # Error message from client
                             jenkins_handled = True
                         elif list_views_match:
                             print("DEBUG: Matched list views command.")

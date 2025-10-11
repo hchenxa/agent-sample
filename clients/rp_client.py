@@ -1,11 +1,11 @@
-import os
 import requests
 from requests import Request, Session
-import urllib.parse
 import logging
+
 
 class ReportPortalManager:
     """Manages interactions with the ReportPortal API to retrieve launch and test item data."""
+
     def __init__(self, endpoint, uuid, project, verify_ssl=True):
         """
         Initializes the ReportPortalManager.
@@ -46,22 +46,31 @@ class ReportPortalManager:
                 req = Request('GET', url, headers=headers)
                 prepped = self.session.prepare_request(req)
                 response = self.session.send(prepped, verify=self.verify_ssl)
-                response.raise_for_status() # Raise an exception for HTTP errors
+                response.raise_for_status()  # Raise an exception for HTTP errors
                 launches_data = response.json()
-                print(f"DEBUG: Raw launches_data from ReportPortal: {launches_data}")
-                
-                # ReportPortal API for launches usually returns a 'content' field with a list of launches.
-                if 'content' in launches_data and isinstance(launches_data['content'], list):
-                    # Extract relevant information (name, id, URL, pass rate, statistics) and format it.
+                print(
+                    f"DEBUG: Raw launches_data from ReportPortal: {launches_data}")
+
+                # ReportPortal API for launches usually returns a 'content'
+                # field with a list of launches.
+                if 'content' in launches_data and isinstance(
+                        launches_data['content'], list):
+                    # Extract relevant information (name, id, URL, pass rate,
+                    # statistics) and format it.
                     formatted_launches = []
                     for launch in launches_data['content']:
-                        print(f"DEBUG: Raw launch data before formatting: {launch}")
+                        print(
+                            f"DEBUG: Raw launch data before formatting: {launch}")
                         launch_id = launch.get('id')
                         launch_name = launch.get('name')
-                        # Construct the UI URL based on common ReportPortal patterns.
-                        launch_url = f"{self.endpoint}/ui/#{self.project}/launches/all/{launch_id}" if launch_id else "N/A"
-                        
-                        pass_rate = "0.00%" # Initialize pass rate as a string.
+                        # Construct the UI URL based on common ReportPortal
+                        # patterns.
+                        launch_url = f"{
+                            self.endpoint}/ui/#{
+                            self.project}/launches/all/{launch_id}" if launch_id else "N/A"
+
+                        # Initialize pass rate as a string.
+                        pass_rate = "0.00%"
                         total = 0
                         passed = 0
                         failed = 0
@@ -74,7 +83,8 @@ class ReportPortalManager:
                             passed = executions.get('passed', 0)
                             failed = executions.get('failed', 0)
                             skipped = executions.get('skipped', 0)
-                            # Calculate pass rate based on passed and failed tests.
+                            # Calculate pass rate based on passed and failed
+                            # tests.
                             total_for_pass_rate = passed + failed
                             if total_for_pass_rate > 0:
                                 pass_rate = f"{(passed / total_for_pass_rate * 100):.2f}%"
@@ -85,7 +95,7 @@ class ReportPortalManager:
                         launch_attributes = launch.get('attributes', [])
                         formatted_launches.append({
                             'name': launch_name,
-                            'id': launch_id, 
+                            'id': launch_id,
                             'url': launch_url,
                             'pass_rate': pass_rate,
                             'total': total,
@@ -122,17 +132,20 @@ class ReportPortalManager:
                     "Authorization": f"Bearer {self.uuid}"
                 }
                 # Construct the URL to get test items for a specific launch.
-                url = f"{self.endpoint}/api/v1/{self.project}/item?filter.eq.launchId={launch_id}&page.size=1000"
+                url = f"{
+                    self.endpoint}/api/v1/{
+                    self.project}/item?filter.eq.launchId={launch_id}&page.size=1000"
                 if item_filter:
                     url += f"&{item_filter}"
-                
+
                 req = Request('GET', url, headers=headers)
                 prepped = self.session.prepare_request(req)
                 response = self.session.send(prepped, verify=self.verify_ssl)
                 response.raise_for_status()
                 test_items_data = response.json()
 
-                if 'content' in test_items_data and isinstance(test_items_data['content'], list):
+                if 'content' in test_items_data and isinstance(
+                        test_items_data['content'], list):
                     formatted_test_items = []
                     for item in test_items_data['content']:
                         formatted_test_items.append({
@@ -173,25 +186,32 @@ class ReportPortalManager:
                     "Authorization": f"Bearer {self.uuid}"
                 }
                 url = f"{self.endpoint}/api/v1/{self.project}/launch/{launch_id}"
-                
+
                 req = Request('GET', url, headers=headers)
                 prepped = self.session.prepare_request(req)
                 response = self.session.send(prepped, verify=self.verify_ssl)
                 response.raise_for_status()
                 launch_data = response.json()
-                
+
                 return {
                     'id': launch_data.get('id'),
                     'name': launch_data.get('name'),
                     'status': launch_data.get('status'),
                     'startTime': launch_data.get('startTime'),
                     'endTime': launch_data.get('endTime'),
-                    'duration': self._calculate_duration(launch_data.get('startTime'), launch_data.get('endTime')),
-                    'statistics': launch_data.get('statistics', {}),
-                    'attributes': launch_data.get('attributes', []),
+                    'duration': self._calculate_duration(
+                        launch_data.get('startTime'),
+                        launch_data.get('endTime')),
+                    'statistics': launch_data.get(
+                        'statistics',
+                        {}),
+                    'attributes': launch_data.get(
+                        'attributes',
+                        []),
                     'mode': launch_data.get('mode'),
-                    'description': launch_data.get('description', '')
-                }
+                    'description': launch_data.get(
+                        'description',
+                        '')}
             except requests.exceptions.RequestException as e:
                 return f"Error connecting to ReportPortal API for launch details: {e}"
             except Exception as e:
@@ -213,15 +233,18 @@ class ReportPortalManager:
                 headers = {
                     "Authorization": f"Bearer {self.uuid}"
                 }
-                url = f"{self.endpoint}/api/v1/{self.project}/log?filter.eq.item={item_id}&page.size=100"
-                
+                url = f"{
+                    self.endpoint}/api/v1/{
+                    self.project}/log?filter.eq.item={item_id}&page.size=100"
+
                 req = Request('GET', url, headers=headers)
                 prepped = self.session.prepare_request(req)
                 response = self.session.send(prepped, verify=self.verify_ssl)
                 response.raise_for_status()
                 logs_data = response.json()
-                
-                if 'content' in logs_data and isinstance(logs_data['content'], list):
+
+                if 'content' in logs_data and isinstance(
+                        logs_data['content'], list):
                     formatted_logs = []
                     for log in logs_data['content']:
                         formatted_logs.append({

@@ -1,0 +1,14 @@
+[flake8]
+max-line-length = 100
+exclude =
+    google-cloud-sdk,
+    venv,
+    .git,
+    __pycache__,
+    .venv
+ignore =
+    # Allow f-strings without placeholders (they may be used for raw strings)
+    F541,
+    # Allow line breaks before and after binary operators (both are acceptable)
+    W503,
+    W504

@@ -22,7 +22,9 @@ class JiraClient:
         except Exception as e:
             print(f"DEBUG: Unexpected exception type: {type(e)}, details: {e}")
             raise ConnectionError(
-                f"An unexpected error occurred during Jira client initialization or verification: {e}") from e
+                f"An unexpected error occurred during Jira client "
+                f"initialization or verification: {e}"
+            ) from e
 
     def query_issues(
             self,
@@ -31,7 +33,8 @@ class JiraClient:
             components=None,
             max_results=50):
         """
-        Queries Jira issues using JQL (Jira Query Language), with optional project and component filters.
+        Queries Jira issues using JQL (Jira Query Language),
+        with optional project and component filters.
 
         Args:
             jql_query (str): The JQL query string.
@@ -66,8 +69,12 @@ class JiraClient:
                     'key': issue.key,
                     'summary': issue.fields.summary,
                     'status': issue.fields.status.name,
-                    'assignee': issue.fields.assignee.displayName if issue.fields.assignee else 'Unassigned',
-                    'reporter': issue.fields.reporter.displayName if issue.fields.reporter else 'Unknown',
+                    'assignee': (issue.fields.assignee.displayName
+                                 if issue.fields.assignee
+                                 else 'Unassigned'),
+                    'reporter': (issue.fields.reporter.displayName
+                                 if issue.fields.reporter
+                                 else 'Unknown'),
                     'created': issue.fields.created,
                     'updated': issue.fields.updated,
                     'priority': issue.fields.priority.name if issue.fields.priority else 'N/A',
@@ -107,8 +114,8 @@ class JiraClient:
 
 if __name__ == '__main__':
     # Example Usage:
-    # Set these environment variables or replace with your actual Jira
-    # credentials
+    # Set these environment variables or replace with your
+    # actual Jira credentials
     JIRA_URL = os.getenv("JIRA_URL", "YOUR_JIRA_URL")
     JIRA_API_TOKEN = os.getenv("JIRA_API_TOKEN", "YOUR_JIRA_API_TOKEN")
 
@@ -131,10 +138,10 @@ if __name__ == '__main__':
             if isinstance(issues, list):
                 for issue in issues:
                     print(
-                        f"  Key: {
-                            issue['key']}, Summary: {
-                            issue['summary']}, Status: {
-                            issue['status']}")
+                        f"  Key: {issue['key']}, "
+                        f"Summary: {issue['summary']}, "
+                        f"Status: {issue['status']}"
+                    )
             else:
                 print(f"Error: {issues}")
 
@@ -149,10 +156,10 @@ if __name__ == '__main__':
                         len(assigned_issues)} issues assigned to current user:")
                 for issue in assigned_issues:
                     print(
-                        f"  Key: {
-                            issue['key']}, Summary: {
-                            issue['summary']}, Status: {
-                            issue['status']}")
+                        f"  Key: {issue['key']}, "
+                        f"Summary: {issue['summary']}, "
+                        f"Status: {issue['status']}"
+                    )
             else:
                 print(f"Error: {assigned_issues}")
         else:

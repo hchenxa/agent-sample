@@ -27,10 +27,13 @@ class ReportPortalManager:
         Retrieves a list of launches from ReportPortal, optionally filtered by attributes.
 
         Args:
-            attribute_filter (str, optional): A comma-separated string of attribute filters (e.g., "component:foo,release:bar").
+            attribute_filter (str, optional): A comma-separated
+                string of attribute filters
+                (e.g., "component:foo,release:bar").
 
         Returns:
-            list: A list of dictionaries, each representing a formatted launch, or an error message string.
+            list: A list of dictionaries, each representing
+                a formatted launch, or an error message string.
         """
         if self.endpoint and self.project and self.uuid:
             try:
@@ -121,10 +124,12 @@ class ReportPortalManager:
 
         Args:
             launch_id (int): The ID of the launch to retrieve test items from.
-            item_filter (str, optional): A filter string for test items (e.g., "filter.eq.status=FAILED").
+            item_filter (str, optional): A filter string for
+                test items (e.g., "filter.eq.status=FAILED").
 
         Returns:
-            list: A list of dictionaries, each representing a formatted test item, or an error message string.
+            list: A list of dictionaries, each representing
+                a formatted test item, or an error message string.
         """
         if self.endpoint and self.project and self.uuid and launch_id:
             try:
@@ -152,7 +157,8 @@ class ReportPortalManager:
                             'name': item.get('name'),
                             'status': item.get('status'),
                             'type': item.get('type'),
-                            'issue_type': item.get('issue', {}).get('issueType', 'N/A'),
+                            'issue_type': item.get(
+                                'issue', {}).get('issueType', 'N/A'),
                             'startTime': item.get('startTime'),
                             'endTime': item.get('endTime'),
                             'duration': self._calculate_duration(item.get('startTime'), item.get('endTime')),
@@ -163,7 +169,10 @@ class ReportPortalManager:
                         })
                     return formatted_test_items
                 else:
-                    return "Unexpected response format for test items from ReportPortal API."
+                    return (
+                        "Unexpected response format for test items "
+                        "from ReportPortal API."
+                    )
             except requests.exceptions.RequestException as e:
                 return f"Error connecting to ReportPortal API for test items: {e}"
             except Exception as e:

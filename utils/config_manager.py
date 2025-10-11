@@ -1,4 +1,5 @@
-"""Handles the setup and management of various client configurations within the Streamlit application."""
+"""Handles the setup and management of various client
+configurations within the Streamlit application."""
 import os
 import streamlit as st
 import truststore
@@ -20,13 +21,17 @@ def get_ollama_models(host):
         return [model["name"] for model in models]
     except (requests.exceptions.RequestException, KeyError) as e:
         st.error(
-            f"Failed to connect to Ollama at {host}. Please check the host address and ensure Ollama is running. Error: {e}")
+            f"Failed to connect to Ollama at {host}. "
+            f"Please check the host address and ensure "
+            f"Ollama is running. Error: {e}"
+        )
         return []
 
 
 def setup_configurations():
     """
-    Sets up and returns various client configurations based on user input in the Streamlit sidebar.
+    Sets up and returns various client configurations
+    based on user input in the Streamlit sidebar.
 
     This function initializes clients for:
     - LLM (Models.corp or Ollama)
@@ -38,8 +43,10 @@ def setup_configurations():
     SSL verification can be optionally disabled for each service.
 
     Returns:
-        tuple: A tuple containing initialized client objects and configuration parameters:
-               (client, jenkins_client, rp_manager, jira_client, jira_project_key, provider, ollama_model)
+        tuple: A tuple containing initialized client objects and
+            configuration parameters: (client, jenkins_client,
+            rp_manager, jira_client, jira_project_key,
+            provider, ollama_model)
     """
     client = None
     jenkins_client = None
@@ -100,8 +107,7 @@ def setup_configurations():
             st.warning("Please configure the Ollama host in the sidebar.")
             st.stop()
 
-    with st.sidebar.expander("Jenkins Configuration"):
-        jenkins_client = None
+    with st.sidebar.expander("Jenkins Configuration", expanded=False):
         jenkins_url = st.text_input(
             "Jenkins URL", value=os.environ.get(
                 "JENKINS_URL", ""))
@@ -119,10 +125,17 @@ def setup_configurations():
                     username=jenkins_username,
                     password=jenkins_api_token)
                 st.success("Jenkins client initialized successfully!")
-                print("DEBUG: Jenkins client initialized.")
+                print(
+                    f"DEBUG: Jenkins client initialized. "
+                    f"URL: {jenkins_url}, User: {jenkins_username}")
             except Exception as e:
                 st.error(f"Failed to initialize Jenkins client: {e}")
                 print(f"DEBUG: Failed to initialize Jenkins client: {e}")
+        else:
+            print(
+                f"DEBUG: Jenkins not configured. URL: {bool(jenkins_url)}, "
+                f"User: {bool(jenkins_username)}, "
+                f"Token: {bool(jenkins_api_token)}")
 
     with st.sidebar.expander("ReportPortal Configuration"):
         rp_endpoint = st.text_input(

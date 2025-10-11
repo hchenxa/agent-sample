@@ -47,6 +47,10 @@ charts_and_analysis_rendered = False
 (client, jenkins_client, rp_manager, jira_client,
  jira_project_key, provider, ollama_model) = setup_configurations()
 
+print(
+    f"DEBUG [main.py]: After setup_configurations - "
+    f"jenkins_client: {jenkins_client is not None}")
+
 
 def read_prompt_file(filename):
     with open(os.path.join("prompt", filename), "r") as f:
@@ -1330,7 +1334,9 @@ if prompt := st.chat_input("What is up?"):
 
                     # Handle new analytics commands
                     if server_info_match:
-                        print("DEBUG: Matched server info command.")
+                        print(
+                            f"DEBUG: Matched server info command. "
+                            f"jenkins_client exists: {jenkins_client is not None}")
                         server_info = jenkins_client.get_server_info()
                         if isinstance(server_info, dict):
                             resp = "### Jenkins Server Information\n\n"

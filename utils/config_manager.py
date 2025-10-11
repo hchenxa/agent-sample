@@ -107,8 +107,7 @@ def setup_configurations():
             st.warning("Please configure the Ollama host in the sidebar.")
             st.stop()
 
-    with st.sidebar.expander("Jenkins Configuration"):
-        jenkins_client = None
+    with st.sidebar.expander("Jenkins Configuration", expanded=False):
         jenkins_url = st.text_input(
             "Jenkins URL", value=os.environ.get(
                 "JENKINS_URL", ""))
@@ -126,10 +125,17 @@ def setup_configurations():
                     username=jenkins_username,
                     password=jenkins_api_token)
                 st.success("Jenkins client initialized successfully!")
-                print("DEBUG: Jenkins client initialized.")
+                print(
+                    f"DEBUG: Jenkins client initialized. "
+                    f"URL: {jenkins_url}, User: {jenkins_username}")
             except Exception as e:
                 st.error(f"Failed to initialize Jenkins client: {e}")
                 print(f"DEBUG: Failed to initialize Jenkins client: {e}")
+        else:
+            print(
+                f"DEBUG: Jenkins not configured. URL: {bool(jenkins_url)}, "
+                f"User: {bool(jenkins_username)}, "
+                f"Token: {bool(jenkins_api_token)}")
 
     with st.sidebar.expander("ReportPortal Configuration"):
         rp_endpoint = st.text_input(
